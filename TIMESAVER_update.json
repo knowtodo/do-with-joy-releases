@@ -1,7 +1,7 @@
 {
-    "app_id":  "timesaver",
-    "version":  "1.0.2",
-    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.0.2/TIMESAVER-1.0.2.zip",
-    "sha256":  "a5adff42618e546bcacb2977a6e354c22680a82f46040fddc4220e4649c42754",
-    "release_notes":  "자동 재실행 수정 및 TIMESAVER 라이선스 접두사 [TS] 적용. 기존 [TK] 라이선스도 계속 사용할 수 있습니다."
+  "app_id": "timesaver",
+  "version": "1.0.3",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.0.3/TIMESAVER-1.0.3.zip",
+  "sha256": "60151caabf5c596c67374f20a0a1aa1e22787eba3337ee2cfa4fe1d590489d0a",
+  "release_notes": "승인기에서 입력한 사용자명으로 발급된 라이선스를 정상 인식하도록 수정했습니다. 기존 [TK] 라이선스도 계속 사용할 수 있습니다."
 }
