@@ -1,7 +1,7 @@
 {
-  "app_id": "infofinder",
-  "version": "1.0.0",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/infofinder-v1.0.0/InfoFinder-1.0.0.zip",
-  "sha256": "c586f34637f6160ca557a0ec8ab3836fee1c7a7fe3564d70c797846b377ca93e",
-  "release_notes": "InfoFinder 최초 정식 배포 버전"
+    "app_id":  "infofinder",
+    "version":  "1.0.0",
+    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/infofinder-v1.0.0/InfoFinder-1.0.0.zip",
+    "sha256":  "ef6967cddef84f82e02fe606063d5bb455f3ed3b057b3dcd0e79db89fa2a3e4c",
+    "release_notes":  "InfoFinder 최초 정식 배포 버전"
 }
