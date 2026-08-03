@@ -1,7 +1,7 @@
 {
   "app_id": "timesaver",
-  "version": "1.0.0",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.0.0/TIMESAVER-1.0.0.zip",
-  "sha256": "8fb22a11ce6a7ba1b1ed67706cbbedea6e35882fcb59f85d2b4b6b0ee62bc9ea",
-  "release_notes": "TIMESAVER 최초 정식 배포 버전"
+  "version": "1.0.1",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.0.1/TIMESAVER-1.0.1.zip",
+  "sha256": "4c2109938c217a23678aa30e0b827ba0c13b66edc651c7dd2a2d012622660a29",
+  "release_notes": "사후관리와 기간만료의 채용공고 입력을 공고내용 한 칸으로 통합하고, IAP 및 구촉수당에서 구직활동 내용을 직접 입력할 수 있도록 개선했습니다."
 }
