@@ -1,7 +1,0 @@
-{
-  "app_id": "timesaver",
-  "version": "1.0.2",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.0.2/TIMESAVER-1.0.2.zip",
-  "sha256": "f3a3ffa54d1fd03aeb903d0e96c8d7afbf6e2aec4ee29321ecab7009b1901a3c",
-  "release_notes": "자동 업데이트 실패 시 상세 진단 로그를 기록하고, 사용자명·라이선스 파일명·경로 등 민감정보가 노출되지 않도록 개선했습니다."
-}
