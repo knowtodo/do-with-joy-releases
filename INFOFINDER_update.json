@@ -1,12 +1,10 @@
 {
     "app_id":  "infofinder",
-    "version":  "1.1.1",
-    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/infofinder-v1.1.1/InfoFinder-1.1.1.zip",
-    "sha256":  "ad928149b4ee434dde832fa0317b61108d307b5e163bb959cdbe0d03bd003c04",
-    "release_notes":  "InfoFinder v1.1.1\n- 업데이트 전 주요 변경사항 안내 추가\n- 업데이트 완료 후 첫 실행 안내 추가\n- 기존 v1.1.0 updater와의 완료 안내 호환성 개선",
+    "version":  "1.1.2",
+    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/infofinder-v1.1.2/InfoFinder-1.1.2.zip",
+    "sha256":  "73a3a2d3b867d471c173f30b2ccb9015a86bb135dca4ad709c09df469d80133f",
+    "release_notes":  "InfoFinder v1.1.0\n- 신입 검색 조건 필터 추가\n- 경력·고용형태·마감일 기준 정렬 추가\n- 인크루트 지역 검색 검증 안정성 개선\nInfoFinder v1.1.1\n- 업데이트 전 주요 변경사항 안내 추가\n- 업데이트 완료 후 첫 실행 안내 추가\n- 기존 버전 업데이트 호환성 개선\nInfoFinder v1.1.2\n- 여러 버전을 건너뛴 업데이트에서 누적 변경사항 안내 개선",
     "notes":  [
-                  "업데이트 전 주요 변경사항 안내 추가",
-                  "업데이트 완료 후 첫 실행 안내 추가",
-                  "기존 v1.1.0 updater와의 완료 안내 호환성 개선"
+                  "여러 버전을 건너뛴 업데이트에서 누적 변경사항 안내 개선"
               ]
 }
