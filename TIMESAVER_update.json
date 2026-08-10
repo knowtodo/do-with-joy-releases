@@ -1,7 +1,7 @@
 {
-    "app_id":  "timesaver",
-    "version":  "1.0.3",
-    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.0.3/TIMESAVER-1.0.3.zip",
-    "sha256":  "a3dfaca81b6a5a85d508d67293f33860efca8775e11e4c21bc958777135be790",
-    "release_notes":  "중복 실행을 방지하여 자동 업데이트 중 파일 점유가 발생하지 않도록 개선하고, 직업훈련 관련 공고 기본 문구의 불필요한 선행 공백을 제거했습니다."
+  "app_id": "timesaver",
+  "version": "1.0.4",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.0.4/TIMESAVER-1.0.4.zip",
+  "sha256": "0049ee369c6e8155f28b1a9f8b2bd9101217d1440a0a67439d201b388848c18e",
+  "release_notes": "1. 구직준비도 점검 설문지와 프로그램의 문항 보기가 일치하도록 변경\n2. 구직활동 이행점검에 직업훈련이 포함되어 있을 때 출석률 관련 문구 추가"
 }
