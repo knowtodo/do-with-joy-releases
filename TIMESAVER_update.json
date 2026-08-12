@@ -1,7 +1,7 @@
 {
     "app_id":  "timesaver",
-    "version":  "1.1.1",
-    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.1/TIMESAVER-1.1.1.zip",
-    "sha256":  "7a45d4925567feb902acd5f76d5025fae4bda11ab23c7028d78661ca44c984d4",
-    "release_notes":  "증빙자료 만들기에 이미지 드래그앤드롭을 추가하고, PDF와 이미지 파일을 함께 PDF로 병합할 수 있도록 개선했습니다. 1유형 IAP 단위기간은 YY.MM.DD 형식으로 표시되며 필요 시 숨길 수 있습니다."
+    "version":  "1.1.2",
+    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.2/TIMESAVER-1.1.2.zip",
+    "sha256":  "1d37b7e2cff80b787e4f4f21c2a24337e5f3cd698d49e825c1bfd4624fcb3ffe",
+    "release_notes":  "PDF와 이미지 파일을 함께 PDF로 합칠 때 병합이 멈출 수 있던 문제를 수정하고 혼합 병합 안정성을 개선했습니다."
 }
