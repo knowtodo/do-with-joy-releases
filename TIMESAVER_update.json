@@ -1,7 +1,7 @@
 {
-  "app_id": "timesaver",
-  "version": "1.1.0",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.0/TIMESAVER-1.1.0.zip",
-  "sha256": "de9137d856a58321c7d68d0018a936b4e971b73d889c94d6ac67336c55948c14",
-  "release_notes": "기존 상담일지 기능은 그대로 유지하면서 TOOLS에 증빙자료 정리도구를 추가했습니다. 이미지·PDF 증빙자료 작성과 용량 압축, PDF 합치기, 이미지→PDF 기능을 TIMESAVER에서 사용할 수 있습니다."
+    "app_id":  "timesaver",
+    "version":  "1.1.1",
+    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.1/TIMESAVER-1.1.1.zip",
+    "sha256":  "7a45d4925567feb902acd5f76d5025fae4bda11ab23c7028d78661ca44c984d4",
+    "release_notes":  "증빙자료 만들기에 이미지 드래그앤드롭을 추가하고, PDF와 이미지 파일을 함께 PDF로 병합할 수 있도록 개선했습니다. 1유형 IAP 단위기간은 YY.MM.DD 형식으로 표시되며 필요 시 숨길 수 있습니다."
 }
