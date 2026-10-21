@@ -1,7 +1,7 @@
 {
-    "app_id":  "timesaver",
-    "version":  "1.1.2",
-    "download_url":  "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.2/TIMESAVER-1.1.2.zip",
-    "sha256":  "1d37b7e2cff80b787e4f4f21c2a24337e5f3cd698d49e825c1bfd4624fcb3ffe",
-    "release_notes":  "PDF와 이미지 파일을 함께 PDF로 합칠 때 병합이 멈출 수 있던 문제를 수정하고 혼합 병합 안정성을 개선했습니다."
+  "app_id": "timesaver",
+  "version": "1.1.3",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.3/TIMESAVER-1.1.3.zip",
+  "sha256": "3a7f55528afdb134885e104aaaf54a35446f38064ba450dc1c91959e765c7225",
+  "release_notes": "구직촉진수당 현재·다음회차 구직활동 UI, 상세 활동·소득 입력, 일부이행 상담일지 및 한국어 조사 처리를 개선하고 PyMuPDF 패키징 안정성을 보완했습니다."
 }
