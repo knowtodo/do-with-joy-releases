@@ -1,0 +1,220 @@
+name: Publish approved application release
+run-name: Publish ${{ inputs.app }} ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Application to publish
+        type: choice
+        required: true
+        options:
+          - timesaver
+          - infofinder
+      version:
+        description: Candidate version in X.Y.Z format
+        type: string
+        required: true
+      source_run_id:
+        description: Successful source workflow_dispatch run ID on main
+        type: string
+        required: true
+      confirmation:
+        description: Type exactly PUBLISH {app} {version}
+        type: string
+        required: true
+      release_notes:
+        description: Release notes; INFOFINDER entries append to cumulative notes
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate_candidate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      source_sha: ${{ steps.verify_run.outputs.source_sha }}
+      artifact_name: ${{ steps.verify_run.outputs.artifact_name }}
+      zip_sha256: ${{ steps.validate_zip.outputs.zip_sha256 }}
+    steps:
+      - name: Checkout release workflow from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+
+      - name: Set up Python 3.13.17 x64
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.13.17'
+          architecture: x64
+
+      - name: Validate manual request before minting tokens
+        shell: pwsh
+        env:
+          APP_ID: ${{ inputs.app }}
+          APP_VERSION: ${{ inputs.version }}
+          PUBLISH_CONFIRMATION: ${{ inputs.confirmation }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          python scripts/release_pipeline.py validate-request --app "$env:APP_ID" --version "$env:APP_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw 'Publication request validation failed' }
+
+      - name: Mint selected source Actions-read token
+        id: source_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          app-id: ${{ vars.SOURCE_READER_APP_ID }}
+          private-key: ${{ secrets.SOURCE_READER_APP_PRIVATE_KEY }}
+          owner: knowtodo
+          repositories: ${{ inputs.app == 'timesaver' && 'timesaver' || 'infofinder' }}
+          permission-actions: read
+
+      - name: Verify successful candidate run on main
+        id: verify_run
+        shell: pwsh
+        env:
+          APP_ID: ${{ inputs.app }}
+          APP_VERSION: ${{ inputs.version }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_TOKEN: ${{ steps.source_token.outputs.token }}
+        run: |
+          python scripts/release_pipeline.py verify-run --app "$env:APP_ID" --version "$env:APP_VERSION" --run-id "$env:SOURCE_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'Source candidate run verification failed' }
+
+      - name: Download selected source candidate artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ${{ steps.verify_run.outputs.artifact_name }}
+          path: ${{ runner.temp }}\release-candidate
+          repository: knowtodo/${{ inputs.app }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ steps.source_token.outputs.token }}
+
+      - name: Validate manifest, ZIP, EXE, and common Updater hashes
+        id: validate_zip
+        shell: pwsh
+        env:
+          APP_ID: ${{ inputs.app }}
+          APP_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ steps.verify_run.outputs.source_sha }}
+          ARTIFACT_DIR: ${{ runner.temp }}\release-candidate
+        run: |
+          python scripts/release_pipeline.py validate-candidate --app "$env:APP_ID" --version "$env:APP_VERSION" --source-sha "$env:SOURCE_SHA" --artifact-dir "$env:ARTIFACT_DIR"
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate validation failed' }
+
+  publish:
+    needs: validate_candidate
+    if: github.ref == 'refs/heads/main'
+    environment: production-release
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release workflow from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+
+      - name: Set up Python 3.13.17 x64
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.13.17'
+          architecture: x64
+
+      - name: Mint selected source Actions-read token
+        id: source_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          app-id: ${{ vars.SOURCE_READER_APP_ID }}
+          private-key: ${{ secrets.SOURCE_READER_APP_PRIVATE_KEY }}
+          owner: knowtodo
+          repositories: ${{ inputs.app == 'timesaver' && 'timesaver' || 'infofinder' }}
+          permission-actions: read
+
+      - name: Reconfirm selected source run
+        id: verify_run
+        shell: pwsh
+        env:
+          APP_ID: ${{ inputs.app }}
+          APP_VERSION: ${{ inputs.version }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_TOKEN: ${{ steps.source_token.outputs.token }}
+        run: |
+          python scripts/release_pipeline.py verify-run --app "$env:APP_ID" --version "$env:APP_VERSION" --run-id "$env:SOURCE_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'Source candidate run verification failed' }
+
+      - name: Confirm the candidate is unchanged since review
+        shell: pwsh
+        env:
+          ACTUAL_SOURCE_SHA: ${{ steps.verify_run.outputs.source_sha }}
+          EXPECTED_SOURCE_SHA: ${{ needs.validate_candidate.outputs.source_sha }}
+        run: |
+          if ($env:ACTUAL_SOURCE_SHA -ne $env:EXPECTED_SOURCE_SHA) { throw 'Source commit changed between validation and approval' }
+
+      - name: Download selected candidate again after approval
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ${{ needs.validate_candidate.outputs.artifact_name }}
+          path: ${{ runner.temp }}\release-candidate
+          repository: knowtodo/${{ inputs.app }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ steps.source_token.outputs.token }}
+
+      - name: Revalidate candidate after approval
+        id: candidate
+        shell: pwsh
+        env:
+          APP_ID: ${{ inputs.app }}
+          APP_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ needs.validate_candidate.outputs.source_sha }}
+          ARTIFACT_DIR: ${{ runner.temp }}\release-candidate
+        run: |
+          python scripts/release_pipeline.py validate-candidate --app "$env:APP_ID" --version "$env:APP_VERSION" --source-sha "$env:SOURCE_SHA" --artifact-dir "$env:ARTIFACT_DIR"
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate validation failed after approval' }
+
+      - name: Confirm the ZIP is unchanged since review
+        shell: pwsh
+        env:
+          ACTUAL_ZIP_SHA256: ${{ steps.candidate.outputs.zip_sha256 }}
+          EXPECTED_ZIP_SHA256: ${{ needs.validate_candidate.outputs.zip_sha256 }}
+        run: |
+          if ($env:ACTUAL_ZIP_SHA256 -ne $env:EXPECTED_ZIP_SHA256) { throw 'Candidate ZIP changed between validation and approval' }
+
+      - name: Validate publication confirmation
+        shell: pwsh
+        env:
+          APP_ID: ${{ inputs.app }}
+          APP_VERSION: ${{ inputs.version }}
+          PUBLISH_CONFIRMATION: ${{ inputs.confirmation }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          python scripts/release_pipeline.py validate-request --app "$env:APP_ID" --version "$env:APP_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw 'Publication request validation failed' }
+
+      - name: Mint release-only Contents-write token
+        id: release_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PUBLISHER_APP_PRIVATE_KEY }}
+          owner: knowtodo
+          repositories: do-with-joy-releases
+          permission-contents: write
+
+      - name: Publish approved Release and activate only its update JSON
+        shell: pwsh
+        env:
+          APP_ID: ${{ inputs.app }}
+          APP_VERSION: ${{ inputs.version }}
+          PUBLISH_CONFIRMATION: ${{ inputs.confirmation }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          ZIP_PATH: ${{ steps.candidate.outputs.zip_path }}
+          ZIP_SHA256: ${{ steps.candidate.outputs.zip_sha256 }}
+          PUBLISH_TOKEN: ${{ steps.release_token.outputs.token }}
+        run: |
+          ./scripts/publish_release.ps1
