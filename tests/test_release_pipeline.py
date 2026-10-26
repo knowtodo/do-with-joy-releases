@@ -94,7 +94,7 @@ class CandidateTests(unittest.TestCase):
 
     def test_accepts_infofinder_zip_name(self):
         with tempfile.TemporaryDirectory() as temporary:
-            result = self.validate(make_candidate(Path(temporary), "infofinder"))
+            result = self.validate(make_candidate(Path(temporary), "infofinder"), "infofinder")
             self.assertEqual(Path(result["zip_path"]).name, "InfoFinder-1.2.0.zip")
 
     def test_rejects_extra_artifact_or_zip_member(self):
