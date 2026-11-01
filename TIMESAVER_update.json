@@ -1,7 +1,7 @@
 {
   "app_id": "timesaver",
-  "version": "1.1.4",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.4/TIMESAVER-1.1.4.zip",
-  "sha256": "b18d0672cca95e48856e23737882300c9d6bbff9a5f44a08d9dbfde64f83f1b2",
-  "release_notes": "초기상담 최종학력 선택 보완 및 IAP 구직활동 구성·인정 건수 계산 개선."
+  "version": "1.1.5",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.5/TIMESAVER-1.1.5.zip",
+  "sha256": "9162e03681fe2b7240288e0f8ebe68fab5079f4f00c7e44c0819afb50822767b",
+  "release_notes": "IAP 지급주기 월말·2월·윤년·연도 변경 계산을 개선하고, 구직활동 추가·수정·삭제·회차 복사 중 스크롤 위치 유지를 개선했습니다."
 }
