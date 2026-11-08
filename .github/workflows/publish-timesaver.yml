@@ -175,7 +175,7 @@ jobs:
               "SHA256SUMS.txt",
               f"TIMESAVER-{version}.zip",
           }
-          actual_outer = {path.name for path in root.iterdir() if path.is_file()}
+          actual_outer = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
           if actual_outer != expected_outer:
               stop(f"Unexpected candidate artifact files: {sorted(actual_outer)}")
 
@@ -201,14 +201,6 @@ jobs:
                   stop(f"Candidate manifest is missing successful legacy update validation for {prior}.")
 
           zip_path = root / f"TIMESAVER-{version}.zip"
-          def digest_bytes(chunks):
-              h = hashlib.sha256()
-              for chunk in chunks:
-                  h.update(chunk)
-              return h.hexdigest()
-
-          if digest_bytes(iter(lambda: zip_path.open("rb").read(1024 * 1024), b"")) == "":
-              stop("Unreachable ZIP digest state.")
           zip_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
           if zip_hash != expected_zip:
               stop(f"ZIP SHA-256 mismatch: got {zip_hash}.")
@@ -380,6 +372,7 @@ jobs:
           set -euo pipefail
           gh api "repos/$RELEASE_REPOSITORY/contents/TIMESAVER_update.json?ref=main" > current-json-response.json
           OLD_COMMIT="$(gh api "repos/$RELEASE_REPOSITORY/commits?path=TIMESAVER_update.json&per_page=1" --jq '.[0].sha')"
+          export OLD_COMMIT
           python - <<'PY'
           import base64
           import json
