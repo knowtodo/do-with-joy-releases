@@ -1,0 +1,510 @@
+name: Publish TIMESAVER release
+run-name: Publish TIMESAVER ${{ inputs.version }}
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/publish-timesaver.yml
+      - docs/RELEASE_AUTOMATION.md
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (X.Y.Z)
+        type: string
+        required: true
+        default: "1.1.6"
+      source_repository:
+        description: Private source repository containing the candidate artifact
+        type: string
+        required: true
+        default: "knowtodo/timesaver"
+      source_run_id:
+        description: Successful Actions run ID that uploaded the candidate
+        type: string
+        required: true
+        default: "42489954978"
+      artifact_name:
+        description: Candidate artifact name
+        type: string
+        required: true
+        default: "TIMESAVER-1.1.6-RELEASE-CANDIDATE"
+      expected_source_commit:
+        description: Exact source commit recorded in the candidate manifest
+        type: string
+        required: true
+        default: "1fab21d2af15b3b5dd8f247ff0376cf59f3fef96"
+      expected_zip_sha256:
+        description: Expected SHA-256 of the actual release ZIP
+        type: string
+        required: true
+        default: "C78E1A8FC2546A40327C701E8E6DDB461DC679A322AD900EAA741405B1808B2D"
+      expected_exe_sha256:
+        description: Expected SHA-256 of TIMESAVER.exe
+        type: string
+        required: true
+        default: "FC0E418D431D753A3C920199F61868B63B74003CFBAA44A5A9794D905820F333"
+      expected_updater_sha256:
+        description: Expected SHA-256 of the shared Updater.exe
+        type: string
+        required: true
+        default: "CEB28ED1E8DFDE50FD1BD8511DE9D05900D4F3C98339AA2D55CEFBC6F49CD498"
+      release_notes:
+        description: Public Release notes
+        type: string
+        required: true
+        default: |-
+          [변경사항]
+          - 구직촉진수당 상담일지에 가족수당 확인 기능 추가
+          - 가족수당 대상자 및 금액 선택 기능 추가
+          - 가족수당 금액 단일 선택 오류 수정
+          - 취업예정 기업명 및 취업예정일 입력 개선
+          - IAP 1유형에 소득·가족수당·취업예정 확인 기능 추가
+          - 입력 내용에 따른 상담일지 자동 문구 생성 개선
+
+permissions:
+  contents: write
+
+concurrency:
+  group: timesaver-release-publisher
+  cancel-in-progress: false
+
+jobs:
+  validate_pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout proposed workflow
+        uses: actions/checkout@v4
+      - name: Set up Python for YAML validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Parse workflow and verify release is dispatch-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check PyYAML==6.0.2
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+          data = yaml.safe_load(Path(".github/workflows/publish-timesaver.yml").read_text(encoding="utf-8"))
+          triggers = data.get("on", data.get(True, {}))
+          assert "pull_request" in triggers and "workflow_dispatch" in triggers
+          publish = data["jobs"]["publish"]
+          assert "workflow_dispatch" in publish["if"] and "refs/heads/main" in publish["if"]
+          assert data["permissions"]["contents"] == "write"
+          print("WORKFLOW_YAML_AND_RELEASE_GATES=PASS")
+          PY
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REPOSITORY: knowtodo/do-with-joy-releases
+    steps:
+      - name: Validate request and required source-read secret
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          EXPECTED_SOURCE_COMMIT: ${{ inputs.expected_source_commit }}
+          EXPECTED_ZIP_SHA256: ${{ inputs.expected_zip_sha256 }}
+          EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
+          EXPECTED_UPDATER_SHA256: ${{ inputs.expected_updater_sha256 }}
+          SOURCE_READ_TOKEN: ${{ secrets.TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "::error::version must be X.Y.Z"; exit 1; }
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::source_run_id must contain digits only"; exit 1; }
+          [[ "$EXPECTED_SOURCE_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "::error::expected_source_commit must be a full commit SHA"; exit 1; }
+          for digest in "$EXPECTED_ZIP_SHA256" "$EXPECTED_EXE_SHA256" "$EXPECTED_UPDATER_SHA256"; do
+            [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "::error::all expected hashes must be SHA-256 hex"; exit 1; }
+          done
+          [[ "$SOURCE_REPOSITORY" == "knowtodo/timesaver" ]] || { echo "::error::source_repository is restricted to knowtodo/timesaver"; exit 1; }
+          [[ -n "$SOURCE_READ_TOKEN" ]] || { echo "::error::Configure repository secret TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN before running this workflow"; exit 1; }
+          [[ -n "$GH_TOKEN" ]] || { echo "::error::GitHub Actions did not provide GITHUB_TOKEN"; exit 1; }
+          [[ "$ARTIFACT_NAME" == "TIMESAVER-$VERSION-RELEASE-CANDIDATE" ]] || { echo "::error::artifact name must match TIMESAVER-{version}-RELEASE-CANDIDATE"; exit 1; }
+          echo "Validated release request for TIMESAVER $VERSION."
+      - name: Download private source candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: incoming
+          repository: ${{ inputs.source_repository }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN }}
+      - name: Validate source run, artifact manifest, ZIP entries, and hashes
+        id: candidate
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_READ_TOKEN: ${{ secrets.TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN }}
+          EXPECTED_SOURCE_COMMIT: ${{ inputs.expected_source_commit }}
+          EXPECTED_ZIP_SHA256: ${{ inputs.expected_zip_sha256 }}
+          EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
+          EXPECTED_UPDATER_SHA256: ${{ inputs.expected_updater_sha256 }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          def stop(message):
+              raise SystemExit(message)
+
+          version = os.environ["VERSION"]
+          run_id = os.environ["SOURCE_RUN_ID"]
+          source_repo = os.environ["SOURCE_REPOSITORY"]
+          token = os.environ["SOURCE_READ_TOKEN"]
+          expected_source = os.environ["EXPECTED_SOURCE_COMMIT"].lower()
+          expected_zip = os.environ["EXPECTED_ZIP_SHA256"].lower()
+          expected_exe = os.environ["EXPECTED_EXE_SHA256"].lower()
+          expected_updater = os.environ["EXPECTED_UPDATER_SHA256"].lower()
+
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{source_repo}/actions/runs/{run_id}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "timesaver-release-publisher",
+              },
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  run = json.load(response)
+          except urllib.error.HTTPError as exc:
+              stop(f"Source run metadata request failed with HTTP {exc.code}.")
+          except Exception as exc:
+              stop(f"Source run metadata request failed ({type(exc).__name__}).")
+
+          if str(run.get("id")) != run_id:
+              stop("The source run ID returned by GitHub does not match the requested run.")
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              stop("The selected source run is not completed successfully.")
+          head_repo = (run.get("head_repository") or {}).get("full_name")
+          if head_repo != source_repo:
+              stop("The source run belongs to a different repository.")
+          if (run.get("head_sha") or "").lower() != expected_source:
+              stop("The source run commit does not match expected_source_commit.")
+
+          root = Path("incoming")
+          expected_outer = {
+              "BUILD_VERIFICATION.txt",
+              "RELEASE_NOTES.txt",
+              "SHA256SUMS.txt",
+              f"TIMESAVER-{version}.zip",
+          }
+          actual_outer = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
+          if actual_outer != expected_outer:
+              stop(f"Unexpected candidate artifact files: {sorted(actual_outer)}")
+
+          manifest = {}
+          for line in (root / "BUILD_VERIFICATION.txt").read_text(encoding="utf-8").splitlines():
+              if "=" in line:
+                  key, value = line.split("=", 1)
+                  manifest[key] = value
+          if manifest.get("VERSION") != version:
+              stop("Candidate manifest version mismatch.")
+          if manifest.get("SOURCE_COMMIT", "").lower() != expected_source:
+              stop("Candidate manifest source commit mismatch.")
+          if manifest.get("EXE_SHA256", "").lower() != expected_exe:
+              stop("Candidate manifest EXE hash mismatch.")
+          if manifest.get("UPDATER_SHA256", "").lower() != expected_updater:
+              stop("Candidate manifest Updater hash mismatch.")
+          if manifest.get("ZIP_SHA256", "").lower() != expected_zip:
+              stop("Candidate manifest ZIP hash mismatch.")
+          if manifest.get("ZIP_MEMBERS") != "TIMESAVER.exe,Updater.exe":
+              stop("Candidate manifest ZIP member list is not the approved two-file layout.")
+          for prior in ("1.1.2", "1.1.3", "1.1.4", "1.1.5"):
+              if manifest.get(f"LEGACY_{prior}") != "PASS":
+                  stop(f"Candidate manifest is missing successful legacy update validation for {prior}.")
+
+          zip_path = root / f"TIMESAVER-{version}.zip"
+          zip_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+          if zip_hash != expected_zip:
+              stop(f"ZIP SHA-256 mismatch: got {zip_hash}.")
+          if manifest.get("ZIP_BYTES") != str(zip_path.stat().st_size):
+              stop("Candidate manifest ZIP size mismatch.")
+
+          with zipfile.ZipFile(zip_path) as archive:
+              names = [info.filename for info in archive.infolist() if not info.is_dir()]
+              if len(names) != 2 or set(names) != {"TIMESAVER.exe", "Updater.exe"}:
+                  stop(f"ZIP must contain only TIMESAVER.exe and Updater.exe; got {names}.")
+              if any("/" in name or "\\" in name or name.startswith(".") for name in names):
+                  stop("ZIP members must be at the archive root.")
+              bad_member = archive.testzip()
+              if bad_member is not None:
+                  stop(f"ZIP CRC validation failed for {bad_member}.")
+              exe_hash = hashlib.sha256(archive.read("TIMESAVER.exe")).hexdigest()
+              updater_hash = hashlib.sha256(archive.read("Updater.exe")).hexdigest()
+              if exe_hash != expected_exe or updater_hash != expected_updater:
+                  stop("An executable hash inside the ZIP does not match the approved value.")
+              if manifest.get("EXE_BYTES") != str(len(archive.read("TIMESAVER.exe"))):
+                  stop("Candidate manifest EXE size mismatch.")
+
+          sums = {}
+          for line in (root / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              parts = line.split()
+              if len(parts) == 2:
+                  sums[parts[1].lstrip("*")] = parts[0].lower()
+          expected_sums = {
+              f"TIMESAVER-{version}.zip": expected_zip,
+              "TIMESAVER.exe": expected_exe,
+              "Updater.exe": expected_updater,
+          }
+          if sums != expected_sums:
+              stop("SHA256SUMS.txt does not match the verified candidate files.")
+
+          out_path = zip_path.resolve()
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"zip_path={out_path}\n")
+              output.write(f"zip_sha256={zip_hash}\n")
+              output.write(f"zip_bytes={zip_path.stat().st_size}\n")
+          print(f"Candidate verified: run={run_id}, source={expected_source}")
+          print(f"ZIP_BYTES={zip_path.stat().st_size}")
+          print(f"ZIP_SHA256={zip_hash}")
+          print(f"EXE_SHA256={exe_hash}")
+          print(f"UPDATER_SHA256={updater_hash}")
+          print("ZIP_MEMBERS=TIMESAVER.exe,Updater.exe")
+          PY
+      - name: Create or safely reuse draft Release and asset
+        id: release
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          ZIP_PATH: ${{ steps.candidate.outputs.zip_path }}
+          EXPECTED_ZIP_SHA256: ${{ inputs.expected_zip_sha256 }}
+          EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
+          EXPECTED_UPDATER_SHA256: ${{ inputs.expected_updater_sha256 }}
+        run: |
+          set -euo pipefail
+          TAG="timesaver-v$VERSION"
+          ASSET="TIMESAVER-$VERSION.zip"
+          TITLE="TIMESAVER $VERSION"
+          if gh api "repos/$RELEASE_REPOSITORY/releases/tags/$TAG" > release.json 2>/dev/null; then
+            python - "$TAG" "$TITLE" "$RELEASE_NOTES" release.json <<'PY'
+          import json, sys
+          tag, title, notes, path = sys.argv[1:]
+          data = json.load(open(path, encoding="utf-8"))
+          if data.get("tag_name") != tag or data.get("name") != title:
+              raise SystemExit("An existing Release has a different tag or title; refusing modification.")
+          body = (data.get("body") or "").replace("\r\n", "\n").strip()
+          expected_body = notes.replace("\r\n", "\n").strip()
+          if body != expected_body:
+              raise SystemExit("An existing Release has different notes; refusing modification.")
+          PY
+            RELEASE_ID="$(jq -r .id release.json)"
+            DRAFT="$(jq -r .draft release.json)"
+          else
+            if gh api "repos/$RELEASE_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              gh release create "$TAG" --repo "$RELEASE_REPOSITORY" --draft --verify-tag --title "$TITLE" --notes "$RELEASE_NOTES"
+            else
+              gh release create "$TAG" --repo "$RELEASE_REPOSITORY" --draft --target main --title "$TITLE" --notes "$RELEASE_NOTES"
+            fi
+            gh api "repos/$RELEASE_REPOSITORY/releases/tags/$TAG" > release.json
+            RELEASE_ID="$(jq -r .id release.json)"
+            DRAFT="$(jq -r .draft release.json)"
+          fi
+
+          asset_count="$(jq --arg name "$ASSET" '[.assets[] | select(.name == $name)] | length' release.json)"
+          if [[ "$asset_count" -gt 1 ]]; then
+            echo "::error::Release contains duplicate assets named $ASSET; refusing changes."
+            exit 1
+          elif [[ "$asset_count" -eq 0 ]]; then
+            gh release upload "$TAG" "$ZIP_PATH" --repo "$RELEASE_REPOSITORY"
+          fi
+
+          mkdir -p published-asset
+          gh release download "$TAG" --repo "$RELEASE_REPOSITORY" --pattern "$ASSET" --dir published-asset
+          downloaded="published-asset/$ASSET"
+          actual_zip="$(sha256sum "$downloaded" | awk '{print toupper($1)}')"
+          if [[ "$actual_zip" != "${EXPECTED_ZIP_SHA256^^}" ]]; then
+            echo "::error::Release asset SHA-256 mismatch; refusing to publish or update JSON."
+            exit 1
+          fi
+          python - "$downloaded" "$EXPECTED_EXE_SHA256" "$EXPECTED_UPDATER_SHA256" <<'PY'
+          import hashlib, sys, zipfile
+          path, expected_exe, expected_updater = sys.argv[1:]
+          with zipfile.ZipFile(path) as archive:
+              names = [item.filename for item in archive.infolist() if not item.is_dir()]
+              if len(names) != 2 or set(names) != {"TIMESAVER.exe", "Updater.exe"}:
+                  raise SystemExit("Downloaded Release asset has unexpected ZIP entries.")
+              if archive.testzip() is not None:
+                  raise SystemExit("Downloaded Release asset failed ZIP CRC validation.")
+              exe = hashlib.sha256(archive.read("TIMESAVER.exe")).hexdigest()
+              updater = hashlib.sha256(archive.read("Updater.exe")).hexdigest()
+              if exe != expected_exe.lower() or updater != expected_updater.lower():
+                  raise SystemExit("Downloaded Release asset EXE hash mismatch.")
+          PY
+
+          if [[ "$DRAFT" == "true" ]]; then
+            gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" -F draft=false >/dev/null
+          fi
+          gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" > release.json
+          if [[ "$(jq -r .draft release.json)" != "false" ]]; then
+            echo "::error::Release did not become public; refusing JSON update."
+            exit 1
+          fi
+
+          URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$TAG/$ASSET"
+          for attempt in 1 2 3 4; do
+            if curl --fail --silent --show-error --location "$URL" --output "public-$ASSET"; then
+              break
+            fi
+            if [[ "$attempt" -eq 4 ]]; then
+              echo "::error::Public Release ZIP download failed; update JSON remains unchanged."
+              exit 1
+            fi
+            sleep 5
+          done
+          public_hash="$(sha256sum "public-$ASSET" | awk '{print toupper($1)}')"
+          if [[ "$public_hash" != "${EXPECTED_ZIP_SHA256^^}" ]]; then
+            echo "::error::Public ZIP SHA-256 mismatch; update JSON remains unchanged."
+            exit 1
+          fi
+          python - "public-$ASSET" "$EXPECTED_EXE_SHA256" "$EXPECTED_UPDATER_SHA256" <<'PY'
+          import hashlib, sys, zipfile
+          path, expected_exe, expected_updater = sys.argv[1:]
+          with zipfile.ZipFile(path) as archive:
+              names = [item.filename for item in archive.infolist() if not item.is_dir()]
+              if len(names) != 2 or set(names) != {"TIMESAVER.exe", "Updater.exe"}:
+                  raise SystemExit("Public ZIP has unexpected entries.")
+              if archive.testzip() is not None:
+                  raise SystemExit("Public ZIP failed CRC validation.")
+              if hashlib.sha256(archive.read("TIMESAVER.exe")).hexdigest() != expected_exe.lower():
+                  raise SystemExit("Public TIMESAVER.exe hash mismatch.")
+              if hashlib.sha256(archive.read("Updater.exe")).hexdigest() != expected_updater.lower():
+                  raise SystemExit("Public Updater.exe hash mismatch.")
+          PY
+          echo "release_url=https://github.com/$RELEASE_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_OUTPUT"
+          echo "download_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "public_zip_sha256=$public_hash" >> "$GITHUB_OUTPUT"
+          echo "PUBLIC_ZIP_SHA256=$public_hash"
+      - name: Update or verify update JSON after public ZIP validation
+        id: update_json
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          DOWNLOAD_URL: ${{ steps.release.outputs.download_url }}
+          ZIP_SHA256: ${{ steps.release.outputs.public_zip_sha256 }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$RELEASE_REPOSITORY/contents/TIMESAVER_update.json?ref=main" > current-json-response.json
+          OLD_COMMIT="$(gh api "repos/$RELEASE_REPOSITORY/commits?path=TIMESAVER_update.json&per_page=1" --jq '.[0].sha')"
+          export OLD_COMMIT
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          def version_tuple(value):
+              if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", value or ""):
+                  raise SystemExit("Existing or requested version is not valid X.Y.Z.")
+              return tuple(map(int, value.split(".")))
+
+          response = json.loads(Path("current-json-response.json").read_text(encoding="utf-8"))
+          old_text = base64.b64decode(response["content"]).decode("utf-8")
+          old = json.loads(old_text)
+          version = os.environ["VERSION"]
+          desired = {
+              "app_id": "timesaver",
+              "version": version,
+              "download_url": os.environ["DOWNLOAD_URL"],
+              "sha256": os.environ["ZIP_SHA256"].lower(),
+              "release_notes": os.environ["RELEASE_NOTES"],
+          }
+          current_version = old.get("version")
+          current_tuple = version_tuple(current_version)
+          requested_tuple = version_tuple(version)
+          Path("previous-update.json").write_text(old_text, encoding="utf-8")
+          if current_tuple == requested_tuple:
+              if old != desired:
+                  raise SystemExit("Update JSON already has this version with different values; refusing overwrite.")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+                  out.write("already_current=true\n")
+                  out.write(f"blob_sha={response['sha']}\n")
+              print("Update JSON already matches the verified Release; no commit needed.")
+          else:
+              if current_tuple > requested_tuple:
+                  raise SystemExit("Existing update JSON is newer than this release; refusing downgrade.")
+              Path("new-update.json").write_text(json.dumps(desired, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+                  out.write("already_current=false\n")
+                  out.write(f"blob_sha={response['sha']}\n")
+              summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+              summary.write_text(
+                  "# TIMESAVER update JSON activation\n\n"
+                  f"- Previous JSON commit: {os.environ.get('OLD_COMMIT', 'not recorded')}\n"
+                  f"- Previous JSON blob: {response['sha']}\n"
+                  f"- Previous version: {current_version}\n"
+                  "- Previous content (also retained in Git history):\n\n"
+                  "```json\n" + json.dumps(old, ensure_ascii=False, indent=2) + "\n```\n",
+                  encoding="utf-8",
+              )
+              print(f"Recorded previous update JSON commit={os.environ.get('OLD_COMMIT', 'not recorded')} version={current_version}.")
+          PY
+          if [[ "$(cat "$GITHUB_OUTPUT" | tail -n 2 | grep -c '^already_current=true$' || true)" -eq 1 ]]; then
+            echo "JSON_ALREADY_CURRENT=true"
+          else
+            BLOB_SHA="$(grep '^blob_sha=' "$GITHUB_OUTPUT" | tail -n 1 | cut -d= -f2)"
+            CONTENT="$(base64 -w0 new-update.json)"
+            gh api --method PUT "repos/$RELEASE_REPOSITORY/contents/TIMESAVER_update.json" \
+              -f message="chore: publish TIMESAVER $VERSION update metadata" \
+              -f content="$CONTENT" -f sha="$BLOB_SHA" -f branch=main > update-commit.json
+            echo "JSON_COMMIT=$(jq -r '.commit.sha' update-commit.json)"
+          fi
+      - name: Verify public update JSON and update endpoint
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          DOWNLOAD_URL: ${{ steps.release.outputs.download_url }}
+          ZIP_SHA256: ${{ steps.release.outputs.public_zip_sha256 }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          RAW_URL="https://raw.githubusercontent.com/$RELEASE_REPOSITORY/main/TIMESAVER_update.json"
+          for attempt in 1 2 3 4; do
+            if curl --fail --silent --show-error --location "$RAW_URL" --output final-update.json; then
+              if python - <<'PY'
+          import json, os
+          from pathlib import Path
+          data = json.loads(Path("final-update.json").read_text(encoding="utf-8"))
+          expected = {
+              "app_id": "timesaver",
+              "version": os.environ["VERSION"],
+              "download_url": os.environ["DOWNLOAD_URL"],
+              "sha256": os.environ["ZIP_SHA256"].lower(),
+              "release_notes": os.environ["RELEASE_NOTES"],
+          }
+          if data != expected:
+              raise SystemExit("Public JSON does not exactly match the validated release.")
+          print("PUBLIC_UPDATE_JSON=PASS")
+          PY
+              then
+                exit 0
+              fi
+            fi
+            if [[ "$attempt" -eq 4 ]]; then
+              echo "::error::Public update JSON verification failed."
+              exit 1
+            fi
+            sleep 5
+          done
