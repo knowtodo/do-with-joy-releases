@@ -1,6 +1,6 @@
 # TIMESAVER Release 자동화
 
-`.github/workflows/publish-timesaver.yml`은 `workflow_dispatch`로만 실행됩니다. 소스 Artifact를 비공개 `knowtodo/timesaver`에서 읽고, 검증된 ZIP만 `knowtodo/do-with-joy-releases`의 Release로 게시한 뒤 공개 ZIP 해시 검증에 성공했을 때 `TIMESAVER_update.json`을 마지막으로 갱신합니다. PR이나 일반 push만으로는 배포하지 않습니다.
+`.github/workflows/publish-timesaver.yml`은 `workflow_dispatch`로만 실행됩니다. 소스 Artifact를 비공개 `knowtodo/timesaver`에서 읽고, 검증된 ZIP만 `knowtodo/do-with-joy-releases`의 Release로 게시한 뒤 공개 ZIP 해시 검증에 성공했을 때 `TIMESAVER_update.json`을 마지막으로 갱신합니다. PR이나 일반 push만으로는 배포하지 않습니다. PR에서는 YAML 문법과 Release의 main-only dispatch gate만 검사하며 게시 job은 실행하지 않습니다.
 
 ## 최초 1회 설정
 
