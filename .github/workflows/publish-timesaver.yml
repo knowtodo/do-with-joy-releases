@@ -303,8 +303,8 @@ jobs:
           data = json.load(open(path, encoding="utf-8"))
           if data.get("tag_name") != tag or data.get("name") != title:
               raise SystemExit("An existing Release has a different tag or title; refusing modification.")
-          body = (data.get("body") or "").replace("\\r\\n", "\\n").strip()
-          expected_body = notes.replace("\\r\\n", "\\n").strip()
+          body = (data.get("body") or "").replace("\r\n", "\n").strip()
+          expected_body = notes.replace("\r\n", "\n").strip()
           if body != expected_body:
               raise SystemExit("An existing Release has different notes; refusing modification.")
           PY
