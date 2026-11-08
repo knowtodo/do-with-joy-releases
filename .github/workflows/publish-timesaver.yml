@@ -2,6 +2,10 @@ name: Publish TIMESAVER release
 run-name: Publish TIMESAVER ${{ inputs.version }}
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/publish-timesaver.yml
+      - docs/RELEASE_AUTOMATION.md
   workflow_dispatch:
     inputs:
       version:
@@ -65,7 +69,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate_pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout proposed workflow
+        uses: actions/checkout@v4
+      - name: Set up Python for YAML validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Parse workflow and verify release is dispatch-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check PyYAML==6.0.2
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+          data = yaml.safe_load(Path(".github/workflows/publish-timesaver.yml").read_text(encoding="utf-8"))
+          triggers = data.get("on", data.get(True, {}))
+          assert "pull_request" in triggers and "workflow_dispatch" in triggers
+          publish = data["jobs"]["publish"]
+          assert "workflow_dispatch" in publish["if"] and "refs/heads/main" in publish["if"]
+          assert data["permissions"]["contents"] == "write"
+          print("WORKFLOW_YAML_AND_RELEASE_GATES=PASS")
+          PY
   publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
