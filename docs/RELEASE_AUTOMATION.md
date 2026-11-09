@@ -1,59 +1,71 @@
 # TIMESAVER Release 자동화
 
-`.github/workflows/publish-timesaver.yml`은 `workflow_dispatch`로만 실행됩니다. 소스 Artifact를 비공개 `knowtodo/timesaver`에서 읽고, 검증된 ZIP만 `knowtodo/do-with-joy-releases`의 Release로 게시한 뒤 공개 ZIP 해시 검증에 성공했을 때 `TIMESAVER_update.json`을 마지막으로 갱신합니다. PR이나 일반 push만으로는 배포하지 않습니다. PR에서는 YAML 문법과 Release의 main-only dispatch gate만 검사하며 게시 job은 실행하지 않습니다.
+`.github/workflows/publish-timesaver.yml`은 main 브랜치에서 두 경로로 작동합니다.
 
-## 최초 1회 설정
+- 정상 운영: 사용자가 Codex에 해당 버전 정식 배포를 명시적으로 승인한 뒤 `release-requests/timesaver/X.Y.Z.json` 새 파일이 main에 추가되면 push 이벤트로 자동 실행됩니다.
+- 비상/복구: 기존 `workflow_dispatch` 수동 실행을 main에서 사용할 수 있습니다.
+- PR 검증: YAML, 배포 gate와 요청 검증 테스트만 실행하며 Release 게시 job은 실행하지 않습니다.
+
+일반 코드·문서·업데이트 JSON 변경이나 PR만으로는 게시 job이 실행되지 않습니다. push 방식은 배포 저장소 main에 들어온 변경 전체가 해당 버전 요청 JSON의 단일 신규 파일 추가일 때만 통과합니다. 요청 파일 수정·삭제·다중 파일 변경, 잘못된 버전/경로/해시, 현재 공개 버전 이하 요청은 차단됩니다.
+
+## 최초 1회 권한 설정
 
 ### 1. 소스 Artifact 읽기 토큰
 
 비공개 소스 저장소의 Artifact는 배포 저장소의 기본 `GITHUB_TOKEN`만으로 읽을 수 없으므로 읽기 전용 fine-grained PAT가 필요합니다.
 
-1. GitHub 프로필 → **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**.
+1. GitHub 프로필 → **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained tokens**에서 토큰을 생성합니다.
 2. Resource owner를 `knowtodo`로, Repository access를 `Only select repositories` → `timesaver`로 설정합니다.
-3. Repository permissions에서 **Actions: Read-only**를 선택합니다. Metadata는 기본 읽기 권한으로 둡니다. 다른 권한은 부여하지 않습니다.
-4. 토큰을 복사한 뒤 배포 저장소 `knowtodo/do-with-joy-releases`의 **Settings** → **Secrets and variables** → **Actions** → **New repository secret**에서 다음 이름으로 저장합니다.
+3. Repository permissions에서 **Actions: Read-only**만 부여합니다. Metadata는 기본 읽기 권한으로 둡니다.
+4. 토큰을 배포 저장소 `knowtodo/do-with-joy-releases`의 **Settings** → **Secrets and variables** → **Actions** → **New repository secret**에서 아래 이름으로 저장합니다.
    - Name: `TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN`
    - Secret: 방금 만든 PAT 값
-5. 토큰 값을 코드, workflow 입력, 채팅 또는 로그에 넣지 않습니다. 만료된 토큰은 같은 절차로 교체합니다.
-
-토큰 발급이나 Secret 저장 권한이 없으면 저장소 소유자가 직접 설정해야 합니다. Codex는 토큰 값을 받거나 출력하지 않습니다.
+5. 토큰을 코드, 배포 요청 파일, 채팅 또는 로그에 넣지 않습니다. 만료/폐기되면 Secret만 교체합니다.
 
 ### 2. 배포 저장소의 GITHUB_TOKEN
 
-배포 저장소 **Settings** → **Actions** → **General** → **Workflow permissions**에서 Actions workflow가 `contents: write`를 사용할 수 있어야 합니다. workflow는 이 권한으로 Release/asset을 만들고, 검증이 끝난 뒤 update JSON을 커밋합니다.
+배포 저장소 **Settings** → **Actions** → **General** → **Workflow permissions**에서 workflow에 `contents: write`가 허용되어야 합니다. publisher는 workflow에 그 최소 권한을 명시해 Release/asset과 검증 완료 후 업데이트 JSON만 변경합니다.
 
-main 브랜치 보호 규칙이 Actions의 직접 콘텐츠 업데이트를 차단하면 JSON 단계는 실패하고 기존 JSON을 보존합니다. 보호 규칙을 무단으로 낮추지 말고 저장소 소유자가 별도로 검토해야 합니다.
+조직 정책이나 main 보호 규칙이 이 권한을 막으면 그 설정을 우회하거나 낮추지 말고 저장소 소유자가 검토해야 합니다.
 
-## v1.1.6 실행
+## v1.1.6 배포 요청
 
-이 PR을 검토 후 main에 병합하고 위 Secret 및 workflow 권한을 설정한 다음:
+요청 파일은 비밀정보를 포함하지 않는 새 JSON 파일입니다. 파일명은 버전과 정확히 일치해야 하며 예: `release-requests/timesaver/1.1.6.json`. 실제 후보 Artifact의 검증된 수치만 기록합니다.
 
-1. 저장소 **Actions** → **Publish TIMESAVER release** → **Run workflow**를 선택합니다.
-2. Branch는 `main`을 선택합니다.
-3. v1.1.6 기본 입력을 확인합니다.
-   - version: `1.1.6`
-   - source_repository: `knowtodo/timesaver`
-   - source_run_id: `42489954978`
-   - artifact_name: `TIMESAVER-1.1.6-RELEASE-CANDIDATE`
-   - expected_source_commit: `1fab21d2af15b3b5dd8f247ff0376cf59f3fef96`
-   - ZIP SHA-256: `C78E1A8FC2546A40327C701E8E6DDB461DC679A322AD900EAA741405B1808B2D`
-   - EXE SHA-256: `FC0E418D431D753A3C920199F61868B63B74003CFBAA44A5A9794D905820F333`
-   - Updater SHA-256: `CEB28ED1E8DFDE50FD1BD8511DE9D05900D4F3C98339AA2D55CEFBC6F49CD498`
-4. Release notes는 workflow 기본값을 사용하거나 해당 버전에 맞는 문구를 입력합니다.
+```json
+{
+  "application": "timesaver",
+  "version": "1.1.6",
+  "source_repository": "knowtodo/timesaver",
+  "source_run_id": "42489954978",
+  "artifact_name": "TIMESAVER-1.1.6-RELEASE-CANDIDATE",
+  "expected_source_commit": "1fab21d2af15b3b5dd8f247ff0376cf59f3fef96",
+  "expected_zip_sha256": "C78E1A8FC2546A40327C701E8E6DDB461DC679A322AD900EAA741405B1808B2D",
+  "expected_exe_sha256": "FC0E418D431D753A3C920199F61868B63B74003CFBAA44A5A9794D905820F333",
+  "expected_updater_sha256": "CEB28ED1E8DFDE50FD1BD8511DE9D05900D4F3C98339AA2D55CEFBC6F49CD498",
+  "release_notes": "[변경사항]\n- 구직촉진수당 상담일지에 가족수당 확인 기능 추가\n- 가족수당 대상자 및 금액 선택 기능 추가\n- 가족수당 금액 단일 선택 오류 수정\n- 취업예정 기업명 및 취업예정일 입력 개선\n- IAP 1유형에 소득·가족수당·취업예정 확인 기능 추가\n- 입력 내용에 따른 상담일지 자동 문구 생성 개선"
+}
+```
 
-## 안전성 및 재실행
+새 요청 파일의 push 한 번이 기존 publisher의 검증·공개 절차를 시작합니다. 게시 전에 source run/commit, manifest, ZIP 구성 및 세 SHA-256을 확인하고, 소스 Secret 부재나 검증 실패 시 Release 변경 없이 중단합니다. 공개 Release ZIP 재다운로드와 해시 검증이 성공한 뒤에만 `TIMESAVER_update.json`을 갱신합니다.
 
-- 입력된 소스 run이 성공 완료됐는지, 저장소와 커밋이 artifact manifest와 일치하는지 확인합니다.
-- 외부 Artifact 파일 목록, manifest, SHA256SUMS, ZIP CRC, 정확한 ZIP 항목 및 EXE 해시를 모두 검증합니다.
-- 동일 태그/Release가 이미 있으면 재사용하며, 이름·설명·asset이 다르거나 해시가 틀리면 덮어쓰지 않고 중단합니다.
-- Draft Release는 업로드 asset을 검증한 후 공개합니다. 공개 URL에서 ZIP을 다시 받아 크기·압축·SHA-256을 확인하기 전에는 update JSON을 변경하지 않습니다.
-- JSON이 이미 해당 버전과 정확히 일치하면 재실행은 변경 없이 성공합니다. 더 높은 버전, 같은 버전의 다른 값, 동시 변경(파일 blob SHA 충돌)은 덮어쓰지 않습니다.
-- JSON 변경 전에 기존 공개 JSON 내용, blob SHA 및 이전 커밋을 Actions 요약에 기록합니다. 기존 내용은 Git 커밋 이력에도 남습니다.
-- 실패 후에는 같은 입력으로 재실행할 수 있습니다. 정상 Release와 asset은 재사용하고, 마지막 JSON 단계부터 안전하게 이어집니다.
-- workflow 로그에는 버전, 커밋 해시, 파일 해시와 검증 결과만 기록하며 토큰은 출력하지 않습니다.
+### 기존 수동 실행
 
-## 향후 버전
+비상시 Actions → **Publish TIMESAVER release** → **Run workflow** → branch `main`으로 실행할 수 있으며, 기존 입력/검증 단계를 그대로 사용합니다.
 
-소스 main에서 테스트와 빌드를 완료하고 후보 Artifact를 업로드한 뒤, 이 workflow를 다시 실행합니다. version, source run ID, artifact name, source commit, 실제 ZIP/EXE/Updater 해시 및 release notes를 해당 후보 값으로 바꿉니다. 해시는 Artifact의 실제 파일에서 얻어야 하며 임의 값으로 입력하지 않습니다.
+## 재실행과 중복 방지
 
-이 문서는 workflow의 동작과 권한 경계를 설명하며, 실제 게시 성공은 해당 Actions 실행이 끝나고 공개 URL 및 raw JSON 검증이 통과한 경우에만 인정합니다.
+- 동일한 배포 요청 파일을 수정/삭제하는 push와 두 개 이상의 변경 파일은 거부합니다.
+- 요청 버전이 현재 JSON보다 낮으면 거부합니다. 이미 공개된 동일 버전은 새 실행에서 거부되며, 동일한 완료 run의 재시도만 JSON 값이 완전히 동일할 때 무변경 통과합니다.
+- 같은 tag/Release가 있더라도 notes, asset 및 SHA-256이 기대값과 다르면 덮어쓰지 않고 중단합니다. 일치하는 중간 상태는 기존 workflow의 복구 로직이 안전하게 재사용합니다.
+- 실패 뒤에는 Actions의 동일 run 재실행을 사용합니다. 이미 update JSON까지 게시된 버전을 새 request commit으로 재배포하지 않습니다.
+- 공개 JSON 내용, blob SHA와 이전 commit 기록은 기존 publisher의 Actions summary/Git history에 유지됩니다.
+
+## 향후 패치
+
+1. Codex가 소스 수정·테스트·후보 빌드를 완료하고 해당 버전의 검증된 run ID, artifact, commit, ZIP/EXE/Updater 해시와 notes를 확보합니다.
+2. 사용자가 정식 배포를 승인한 뒤, Codex가 새 버전 파일 `release-requests/timesaver/X.Y.Z.json` 하나만 main에 추가합니다.
+3. GitHub Actions가 Artifact를 다시 검증하고 Release, ZIP 공개 검증, update JSON 갱신을 자동 수행합니다.
+4. Codex는 Actions 결과, 공개 Release, raw JSON과 공개 ZIP 해시를 확인하고 최종 상태를 보고합니다.
+
+새 배포 시스템이나 매 패치마다 별도의 workflow를 추가하지 않습니다. 자동 실행 여부는 GitHub push event의 실제 Actions run으로 확인하며, GitHub가 해당 인증 주체의 push 이벤트를 전달하지 않으면 배포 완료로 간주하지 않습니다.
