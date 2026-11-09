@@ -1,11 +1,18 @@
 name: Publish TIMESAVER release
-run-name: Publish TIMESAVER ${{ inputs.version }}
+run-name: Publish TIMESAVER release
 
 on:
   pull_request:
     paths:
       - .github/workflows/publish-timesaver.yml
       - docs/RELEASE_AUTOMATION.md
+      - scripts/resolve_timesaver_release_request.py
+      - tests/test_timesaver_release_request.py
+      - release-requests/timesaver/**
+  push:
+    branches: [main]
+    paths:
+      - release-requests/timesaver/**
   workflow_dispatch:
     inputs:
       version:
@@ -81,7 +88,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Parse workflow and verify release is dispatch-only
+      - name: Validate workflow gates and release request tests
         shell: bash
         run: |
           set -euo pipefail
@@ -89,33 +96,70 @@ jobs:
           python - <<'PY'
           import yaml
           from pathlib import Path
-          data = yaml.safe_load(Path(".github/workflows/publish-timesaver.yml").read_text(encoding="utf-8"))
+
+          workflow_path = Path(".github/workflows/publish-timesaver.yml")
+          source = workflow_path.read_text(encoding="utf-8")
+          data = yaml.safe_load(source)
           triggers = data.get("on", data.get(True, {}))
-          assert "pull_request" in triggers and "workflow_dispatch" in triggers
+          assert "pull_request" in triggers and "workflow_dispatch" in triggers and "push" in triggers
+          assert triggers["push"]["branches"] == ["main"]
+          assert triggers["push"]["paths"] == ["release-requests/timesaver/**"]
+          assert "release-requests/timesaver/**" in triggers["pull_request"]["paths"]
           publish = data["jobs"]["publish"]
-          assert "workflow_dispatch" in publish["if"] and "refs/heads/main" in publish["if"]
+          assert "workflow_dispatch" in publish["if"] and "push" in publish["if"]
+          assert "refs/heads/main" in publish["if"] and "pull_request" not in publish["if"]
           assert data["permissions"]["contents"] == "write"
-          print("WORKFLOW_YAML_AND_RELEASE_GATES=PASS")
+          assert Path("scripts/resolve_timesaver_release_request.py").is_file()
+          print("WORKFLOW_TRIGGERS_AND_RELEASE_GATES=PASS")
           PY
+          python -m unittest discover -s tests -p "test_timesaver_release_request.py" -v
   publish:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_REPOSITORY: knowtodo/do-with-joy-releases
     steps:
+      - name: Checkout deployment repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python for request validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resolve dispatch inputs or the new release request
+        id: release_request
+        shell: bash
+        env:
+          REQUEST_EVENT_NAME: ${{ github.event_name }}
+          REQUEST_REF: ${{ github.ref }}
+          REQUEST_SHA: ${{ github.sha }}
+          REQUEST_BEFORE: ${{ github.event.before }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          DISPATCH_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          DISPATCH_ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          DISPATCH_EXPECTED_SOURCE_COMMIT: ${{ inputs.expected_source_commit }}
+          DISPATCH_EXPECTED_ZIP_SHA256: ${{ inputs.expected_zip_sha256 }}
+          DISPATCH_EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
+          DISPATCH_EXPECTED_UPDATER_SHA256: ${{ inputs.expected_updater_sha256 }}
+          DISPATCH_RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: python scripts/resolve_timesaver_release_request.py
       - name: Validate request and required source-read secret
         shell: bash
         env:
-          VERSION: ${{ inputs.version }}
-          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-          ARTIFACT_NAME: ${{ inputs.artifact_name }}
-          EXPECTED_SOURCE_COMMIT: ${{ inputs.expected_source_commit }}
-          EXPECTED_ZIP_SHA256: ${{ inputs.expected_zip_sha256 }}
-          EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
-          EXPECTED_UPDATER_SHA256: ${{ inputs.expected_updater_sha256 }}
+          VERSION: ${{ steps.release_request.outputs.version }}
+          SOURCE_REPOSITORY: ${{ steps.release_request.outputs.source_repository }}
+          SOURCE_RUN_ID: ${{ steps.release_request.outputs.source_run_id }}
+          ARTIFACT_NAME: ${{ steps.release_request.outputs.artifact_name }}
+          EXPECTED_SOURCE_COMMIT: ${{ steps.release_request.outputs.expected_source_commit }}
+          EXPECTED_ZIP_SHA256: ${{ steps.release_request.outputs.expected_zip_sha256 }}
+          EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
+          EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
           SOURCE_READ_TOKEN: ${{ secrets.TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN }}
         run: |
           set -euo pipefail
@@ -130,26 +174,42 @@ jobs:
           [[ -n "$GH_TOKEN" ]] || { echo "::error::GitHub Actions did not provide GITHUB_TOKEN"; exit 1; }
           [[ "$ARTIFACT_NAME" == "TIMESAVER-$VERSION-RELEASE-CANDIDATE" ]] || { echo "::error::artifact name must match TIMESAVER-{version}-RELEASE-CANDIDATE"; exit 1; }
           echo "Validated release request for TIMESAVER $VERSION."
+      - name: Reject an already-published or downgraded version before release changes
+        shell: bash
+        env:
+          RESOLVED_VERSION: ${{ steps.release_request.outputs.version }}
+          RESOLVED_SOURCE_REPOSITORY: ${{ steps.release_request.outputs.source_repository }}
+          RESOLVED_SOURCE_RUN_ID: ${{ steps.release_request.outputs.source_run_id }}
+          RESOLVED_ARTIFACT_NAME: ${{ steps.release_request.outputs.artifact_name }}
+          RESOLVED_EXPECTED_SOURCE_COMMIT: ${{ steps.release_request.outputs.expected_source_commit }}
+          RESOLVED_EXPECTED_ZIP_SHA256: ${{ steps.release_request.outputs.expected_zip_sha256 }}
+          RESOLVED_EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
+          RESOLVED_EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
+          RESOLVED_RELEASE_NOTES: ${{ steps.release_request.outputs.release_notes }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location "https://raw.githubusercontent.com/$RELEASE_REPOSITORY/main/TIMESAVER_update.json" --output current-public-json.json
+          python scripts/resolve_timesaver_release_request.py --check-public-version current-public-json.json
       - name: Download private source candidate artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.artifact_name }}
+          name: ${{ steps.release_request.outputs.artifact_name }}
           path: incoming
-          repository: ${{ inputs.source_repository }}
-          run-id: ${{ inputs.source_run_id }}
+          repository: ${{ steps.release_request.outputs.source_repository }}
+          run-id: ${{ steps.release_request.outputs.source_run_id }}
           github-token: ${{ secrets.TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN }}
       - name: Validate source run, artifact manifest, ZIP entries, and hashes
         id: candidate
         shell: bash
         env:
-          VERSION: ${{ inputs.version }}
-          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          VERSION: ${{ steps.release_request.outputs.version }}
+          SOURCE_REPOSITORY: ${{ steps.release_request.outputs.source_repository }}
+          SOURCE_RUN_ID: ${{ steps.release_request.outputs.source_run_id }}
           SOURCE_READ_TOKEN: ${{ secrets.TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN }}
-          EXPECTED_SOURCE_COMMIT: ${{ inputs.expected_source_commit }}
-          EXPECTED_ZIP_SHA256: ${{ inputs.expected_zip_sha256 }}
-          EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
-          EXPECTED_UPDATER_SHA256: ${{ inputs.expected_updater_sha256 }}
+          EXPECTED_SOURCE_COMMIT: ${{ steps.release_request.outputs.expected_source_commit }}
+          EXPECTED_ZIP_SHA256: ${{ steps.release_request.outputs.expected_zip_sha256 }}
+          EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
+          EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -285,12 +345,12 @@ jobs:
         id: release
         shell: bash
         env:
-          VERSION: ${{ inputs.version }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
+          VERSION: ${{ steps.release_request.outputs.version }}
+          RELEASE_NOTES: ${{ steps.release_request.outputs.release_notes }}
           ZIP_PATH: ${{ steps.candidate.outputs.zip_path }}
-          EXPECTED_ZIP_SHA256: ${{ inputs.expected_zip_sha256 }}
-          EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
-          EXPECTED_UPDATER_SHA256: ${{ inputs.expected_updater_sha256 }}
+          EXPECTED_ZIP_SHA256: ${{ steps.release_request.outputs.expected_zip_sha256 }}
+          EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
+          EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
         run: |
           set -euo pipefail
           TAG="timesaver-v$VERSION"
@@ -399,8 +459,8 @@ jobs:
         id: update_json
         shell: bash
         env:
-          VERSION: ${{ inputs.version }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
+          VERSION: ${{ steps.release_request.outputs.version }}
+          RELEASE_NOTES: ${{ steps.release_request.outputs.release_notes }}
           DOWNLOAD_URL: ${{ steps.release.outputs.download_url }}
           ZIP_SHA256: ${{ steps.release.outputs.public_zip_sha256 }}
         run: |
@@ -474,10 +534,10 @@ jobs:
       - name: Verify public update JSON and update endpoint
         shell: bash
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.release_request.outputs.version }}
           DOWNLOAD_URL: ${{ steps.release.outputs.download_url }}
           ZIP_SHA256: ${{ steps.release.outputs.public_zip_sha256 }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
+          RELEASE_NOTES: ${{ steps.release_request.outputs.release_notes }}
         run: |
           set -euo pipefail
           RAW_URL="https://raw.githubusercontent.com/$RELEASE_REPOSITORY/main/TIMESAVER_update.json"
