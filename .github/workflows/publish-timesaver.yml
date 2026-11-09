@@ -110,6 +110,11 @@ jobs:
           assert "refs/heads/main" in publish["if"] and "pull_request" not in publish["if"]
           assert data["permissions"]["contents"] == "write"
           assert Path("scripts/resolve_timesaver_release_request.py").is_file()
+          assert source.index("Reject an already-published") < source.index("Download private source candidate artifact")
+          assert source.index("Download private source candidate artifact") < source.index("Create or safely reuse draft Release and asset")
+          assert source.index("Public ZIP SHA-256 mismatch") < source.index("Update or verify update JSON")
+          assert "asset_count" in source and "refusing modification" in source
+          assert "refusing to publish or update JSON" in source
           print("WORKFLOW_TRIGGERS_AND_RELEASE_GATES=PASS")
           PY
           python -m unittest discover -s tests -p "test_timesaver_release_request.py" -v
