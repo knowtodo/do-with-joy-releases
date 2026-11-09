@@ -115,6 +115,7 @@ jobs:
           assert source.index("Public ZIP SHA-256 mismatch") < source.index("Update or verify update JSON")
           assert "asset_count" in source and "refusing modification" in source
           assert "releases?per_page=100" in source and "releases/assets/$ASSET_ID" in source
+          assert "uploads.github.com" in source and "--data-binary \"@$ZIP_PATH\"" in source
           assert "gh release upload \"$TAG\"" not in source and "gh release download \"$TAG\"" not in source
           assert "refusing to publish or update JSON" in source
           print("WORKFLOW_TRIGGERS_AND_RELEASE_GATES=PASS")
@@ -410,7 +411,13 @@ jobs:
             echo "::error::Release contains duplicate assets named $ASSET; refusing changes."
             exit 1
           elif [[ "$asset_count" -eq 0 ]]; then
-            gh api --method POST -H "Content-Type: application/zip" --input "$ZIP_PATH" "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?name=$ASSET" >/dev/null
+            UPLOAD_URL="https://uploads.github.com/repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?name=$ASSET"
+            curl --fail --silent --show-error --location \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              --header "Content-Type: application/zip" \
+              --data-binary "@$ZIP_PATH" \
+              "$UPLOAD_URL" >/dev/null
           fi
 
           gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" > release.json
