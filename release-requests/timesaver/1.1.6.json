@@ -1,0 +1,12 @@
+{
+  "application": "timesaver",
+  "version": "1.1.6",
+  "source_repository": "knowtodo/timesaver",
+  "source_run_id": "42489954978",
+  "artifact_name": "TIMESAVER-1.1.6-RELEASE-CANDIDATE",
+  "expected_source_commit": "1fab21d2af15b3b5dd8f247ff0376cf59f3fef96",
+  "expected_zip_sha256": "C78E1A8FC2546A40327C701E8E6DDB461DC679A322AD900EAA741405B1808B2D",
+  "expected_exe_sha256": "FC0E418D431D753A3C920199F61868B63B74003CFBAA44A5A9794D905820F333",
+  "expected_updater_sha256": "CEB28ED1E8DFDE50FD1BD8511DE9D05900D4F3C98339AA2D55CEFBC6F49CD498",
+  "release_notes": "[변경사항]\n- 구직촉진수당 상담일지에 가족수당 확인 기능 추가\n- 가족수당 대상자 및 금액 선택 기능 추가\n- 가족수당 금액 단일 선택 오류 수정\n- 취업예정 기업명 및 취업예정일 입력 개선\n- IAP 1유형에 소득·가족수당·취업예정 확인 기능 추가\n- 입력 내용에 따른 상담일지 자동 문구 생성 개선"
+}
