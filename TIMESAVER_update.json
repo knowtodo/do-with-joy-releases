@@ -1,7 +1,7 @@
 {
   "app_id": "timesaver",
-  "version": "1.1.5",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.5/TIMESAVER-1.1.5.zip",
-  "sha256": "9162e03681fe2b7240288e0f8ebe68fab5079f4f00c7e44c0819afb50822767b",
-  "release_notes": "IAP 지급주기 월말·2월·윤년·연도 변경 계산을 개선하고, 구직활동 추가·수정·삭제·회차 복사 중 스크롤 위치 유지를 개선했습니다."
+  "version": "1.1.6",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.6/TIMESAVER-1.1.6.zip",
+  "sha256": "c78e1a8fc2546a40327c701e8e6ddb461dc679a322ad900eaa741405b1808b2d",
+  "release_notes": "[변경사항]\n- 구직촉진수당 상담일지에 가족수당 확인 기능 추가\n- 가족수당 대상자 및 금액 선택 기능 추가\n- 가족수당 금액 단일 선택 오류 수정\n- 취업예정 기업명 및 취업예정일 입력 개선\n- IAP 1유형에 소득·가족수당·취업예정 확인 기능 추가\n- 입력 내용에 따른 상담일지 자동 문구 생성 개선"
 }
