@@ -7,6 +7,7 @@ on:
       - .github/workflows/publish-timesaver.yml
       - docs/RELEASE_AUTOMATION.md
       - scripts/resolve_timesaver_release_request.py
+      - scripts/timesaver_release_assets.py
       - tests/test_timesaver_release_request.py
       - release-requests/timesaver/**
   push:
@@ -55,6 +56,16 @@ on:
         type: string
         required: true
         default: "CEB28ED1E8DFDE50FD1BD8511DE9D05900D4F3C98339AA2D55CEFBC6F49CD498"
+      expected_repair_sha256:
+        description: Optional expected SHA-256 of the standalone repair tool
+        type: string
+        required: false
+        default: ""
+      expected_repair_bytes:
+        description: Optional expected byte size of the standalone repair tool
+        type: string
+        required: false
+        default: ""
       release_notes:
         description: Public Release notes
         type: string
@@ -111,22 +122,30 @@ jobs:
           assert data["permissions"]["contents"] == "write"
           assert Path("scripts/resolve_timesaver_release_request.py").is_file()
           assert source.index("Reject an already-published") < source.index("Download private source candidate artifact")
-          assert source.index("Download private source candidate artifact") < source.index("Create or safely reuse draft Release and asset")
+          assert source.index("Download private source candidate artifact") < source.index("Create or safely reuse draft Release and assets")
           assert source.index("Public ZIP SHA-256 mismatch") < source.index("Update or verify update JSON")
-          assert "asset_count" in source and "refusing modification" in source
           assert "RESOLVED_RETRY_REQUEST" in source and "RESOLVED_RETRY_BASELINE_VERSION" in source
+          assert "expected_repair_sha256" in source and "expected_repair_bytes" in source
+          helper = Path("scripts/timesaver_release_assets.py").read_text(encoding="utf-8")
+          assert "validate_candidate_file_set" in source and "verify_file" in source
+          assert "release_asset_upload_plan" in helper and "reject_unexpected" in helper
+          assert "--require-all" in source and "plan_args+=(--repair-name" in source
+          assert 'verify_public_asset "$REPAIR_ASSET_NAME"' in source
+          assert "repair tool hash mismatch" in source
+          assert "ZIP_MEMBERS=TIMESAVER.exe,Updater.exe" in source
           assert "release-requests/timesaver/retries" in source
-          release_start = source.index("      - name: Create or safely reuse draft Release and asset\n")
+          release_start = source.index("      - name: Create or safely reuse draft Release and assets\n")
           json_start = source.index("      - name: Update or verify update JSON after public ZIP validation\n")
+          assert source.index('verify_public_asset "$REPAIR_ASSET_NAME"') < json_start
           release_logic = source[release_start:json_start]
           assert "find_release_by_tag()" in release_logic and "releases/$RELEASE_ID" in release_logic
-          assert 'if [[ "$asset_count" -gt 1 ]]' in release_logic
-          assert 'elif [[ "$asset_count" -eq 0 ]]' in release_logic
-          assert "releases/assets/$ASSET_ID" in release_logic and "uploads.github.com" in release_logic
-          assert "releases?per_page=100" in source and "releases/assets/$ASSET_ID" in source
-          assert "uploads.github.com" in source and "--data-binary \"@$ZIP_PATH\"" in source
+          assert "timesaver_release_assets.py" in release_logic and "--require-all" in release_logic
+          assert "releases/assets/$asset_id" in release_logic and "uploads.github.com" in release_logic
+          assert "releases?per_page=100" in source and "releases/assets/$asset_id" in source
+          assert "uploads.github.com" in source and "--data-binary \"@$upload_path\"" in source
+          assert "application/zip" in release_logic and "application/octet-stream" in release_logic
           assert "gh release upload \"$TAG\"" not in source and "gh release download \"$TAG\"" not in source
-          assert "refusing to publish or update JSON" in source
+          assert "update JSON remains unchanged" in release_logic
           print("WORKFLOW_TRIGGERS_AND_RELEASE_GATES=PASS")
           PY
           python -m unittest discover -s tests -p "test_timesaver_release_request.py" -v
@@ -165,6 +184,8 @@ jobs:
           DISPATCH_EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
           DISPATCH_EXPECTED_UPDATER_SHA256: ${{ inputs.expected_updater_sha256 }}
           DISPATCH_RELEASE_NOTES: ${{ inputs.release_notes }}
+          DISPATCH_EXPECTED_REPAIR_SHA256: ${{ inputs.expected_repair_sha256 }}
+          DISPATCH_EXPECTED_REPAIR_BYTES: ${{ inputs.expected_repair_bytes }}
         run: python scripts/resolve_timesaver_release_request.py
       - name: Validate request and required source-read secret
         shell: bash
@@ -177,6 +198,8 @@ jobs:
           EXPECTED_ZIP_SHA256: ${{ steps.release_request.outputs.expected_zip_sha256 }}
           EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
           EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
+          EXPECTED_REPAIR_SHA256: ${{ steps.release_request.outputs.expected_repair_sha256 }}
+          EXPECTED_REPAIR_BYTES: ${{ steps.release_request.outputs.expected_repair_bytes }}
           SOURCE_READ_TOKEN: ${{ secrets.TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN }}
         run: |
           set -euo pipefail
@@ -186,6 +209,11 @@ jobs:
           for digest in "$EXPECTED_ZIP_SHA256" "$EXPECTED_EXE_SHA256" "$EXPECTED_UPDATER_SHA256"; do
             [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "::error::all expected hashes must be SHA-256 hex"; exit 1; }
           done
+          if [[ -n "$EXPECTED_REPAIR_SHA256" || -n "$EXPECTED_REPAIR_BYTES" ]]; then
+            [[ "$EXPECTED_REPAIR_SHA256" =~ ^[0-9a-fA-F]{64}$ && "$EXPECTED_REPAIR_BYTES" =~ ^[1-9][0-9]*$ ]] || {
+              echo "::error::repair tool hash and positive byte size must be provided together"; exit 1;
+            }
+          fi
           [[ "$SOURCE_REPOSITORY" == "knowtodo/timesaver" ]] || { echo "::error::source_repository is restricted to knowtodo/timesaver"; exit 1; }
           [[ -n "$SOURCE_READ_TOKEN" ]] || { echo "::error::Configure repository secret TIMESAVER_SOURCE_ARTIFACT_READ_TOKEN before running this workflow"; exit 1; }
           [[ -n "$GH_TOKEN" ]] || { echo "::error::GitHub Actions did not provide GITHUB_TOKEN"; exit 1; }
@@ -202,6 +230,8 @@ jobs:
           RESOLVED_EXPECTED_ZIP_SHA256: ${{ steps.release_request.outputs.expected_zip_sha256 }}
           RESOLVED_EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
           RESOLVED_EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
+          RESOLVED_EXPECTED_REPAIR_SHA256: ${{ steps.release_request.outputs.expected_repair_sha256 }}
+          RESOLVED_EXPECTED_REPAIR_BYTES: ${{ steps.release_request.outputs.expected_repair_bytes }}
           RESOLVED_RELEASE_NOTES: ${{ steps.release_request.outputs.release_notes }}
           RESOLVED_RETRY_REQUEST: ${{ steps.release_request.outputs.retry_request }}
           RESOLVED_RETRY_BASELINE_VERSION: ${{ steps.release_request.outputs.retry_baseline_version }}
@@ -229,6 +259,8 @@ jobs:
           EXPECTED_ZIP_SHA256: ${{ steps.release_request.outputs.expected_zip_sha256 }}
           EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
           EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
+          EXPECTED_REPAIR_SHA256: ${{ steps.release_request.outputs.expected_repair_sha256 }}
+          EXPECTED_REPAIR_BYTES: ${{ steps.release_request.outputs.expected_repair_bytes }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -240,6 +272,14 @@ jobs:
           import urllib.request
           import zipfile
           from pathlib import Path
+          from scripts.timesaver_release_assets import (
+              AssetValidationError,
+              REPAIR_ASSET_NAME,
+              expected_candidate_file_names,
+              parse_optional_repair_expectations,
+              validate_candidate_file_set,
+              verify_file,
+          )
 
           def stop(message):
               raise SystemExit(message)
@@ -281,15 +321,15 @@ jobs:
               stop("The source run commit does not match expected_source_commit.")
 
           root = Path("incoming")
-          expected_outer = {
-              "BUILD_VERIFICATION.txt",
-              "RELEASE_NOTES.txt",
-              "SHA256SUMS.txt",
-              f"TIMESAVER-{version}.zip",
-          }
-          actual_outer = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
-          if actual_outer != expected_outer:
-              stop(f"Unexpected candidate artifact files: {sorted(actual_outer)}")
+          try:
+              repair_expectations = parse_optional_repair_expectations(
+                  os.environ.get("EXPECTED_REPAIR_SHA256", ""),
+                  os.environ.get("EXPECTED_REPAIR_BYTES", ""),
+              )
+              expected_outer = expected_candidate_file_names(version, repair_expectations is not None)
+              candidate_files = validate_candidate_file_set(root, expected_outer)
+          except AssetValidationError as exc:
+              stop(str(exc))
 
           manifest = {}
           for line in (root / "BUILD_VERIFICATION.txt").read_text(encoding="utf-8").splitlines():
@@ -335,6 +375,28 @@ jobs:
               if manifest.get("EXE_BYTES") != str(len(archive.read("TIMESAVER.exe"))):
                   stop("Candidate manifest EXE size mismatch.")
 
+          repair_path = ""
+          repair_hash = ""
+          repair_bytes = ""
+          if repair_expectations is not None:
+              expected_repair_hash, expected_repair_bytes = repair_expectations
+              repair_path = candidate_files[REPAIR_ASSET_NAME]
+              try:
+                  actual_repair_hash = verify_file(
+                      repair_path,
+                      expected_repair_hash,
+                      expected_repair_bytes,
+                      REPAIR_ASSET_NAME,
+                  )
+              except AssetValidationError as exc:
+                  stop(str(exc))
+              if manifest.get("REPAIR_EXE_SHA256", "").lower() != expected_repair_hash:
+                  stop("Candidate manifest repair tool hash mismatch.")
+              if manifest.get("REPAIR_EXE_BYTES") != str(expected_repair_bytes):
+                  stop("Candidate manifest repair tool byte size mismatch.")
+              repair_hash = actual_repair_hash
+              repair_bytes = str(expected_repair_bytes)
+
           sums = {}
           for line in (root / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
               parts = line.split()
@@ -353,23 +415,34 @@ jobs:
               output.write(f"zip_path={out_path}\n")
               output.write(f"zip_sha256={zip_hash}\n")
               output.write(f"zip_bytes={zip_path.stat().st_size}\n")
+              output.write(f"repair_path={repair_path}\n")
+              output.write(f"repair_sha256={repair_hash}\n")
+              output.write(f"repair_bytes={repair_bytes}\n")
           print(f"Candidate verified: run={run_id}, source={expected_source}")
           print(f"ZIP_BYTES={zip_path.stat().st_size}")
           print(f"ZIP_SHA256={zip_hash}")
           print(f"EXE_SHA256={exe_hash}")
           print(f"UPDATER_SHA256={updater_hash}")
           print("ZIP_MEMBERS=TIMESAVER.exe,Updater.exe")
+          if repair_hash:
+              print(f"REPAIR_EXE_BYTES={repair_bytes}")
+              print(f"REPAIR_EXE_SHA256={repair_hash}")
           PY
-      - name: Create or safely reuse draft Release and asset
+      - name: Create or safely reuse draft Release and assets
         id: release
         shell: bash
         env:
           VERSION: ${{ steps.release_request.outputs.version }}
           RELEASE_NOTES: ${{ steps.release_request.outputs.release_notes }}
           ZIP_PATH: ${{ steps.candidate.outputs.zip_path }}
+          ZIP_BYTES: ${{ steps.candidate.outputs.zip_bytes }}
+          REPAIR_ASSET_PATH: ${{ steps.candidate.outputs.repair_path }}
+          REPAIR_ASSET_NAME: TIMESAVER_Update_Repair.exe
+          REPAIR_BYTES: ${{ steps.candidate.outputs.repair_bytes }}
           EXPECTED_ZIP_SHA256: ${{ steps.release_request.outputs.expected_zip_sha256 }}
           EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
           EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
+          EXPECTED_REPAIR_SHA256: ${{ steps.release_request.outputs.expected_repair_sha256 }}
         run: |
           set -euo pipefail
           TAG="timesaver-v$VERSION"
@@ -417,37 +490,91 @@ jobs:
 
           RELEASE_ID="$(jq -r .id release.json)"
           DRAFT="$(jq -r .draft release.json)"
-          asset_count="$(jq --arg name "$ASSET" '[.assets[] | select(.name == $name)] | length' release.json)"
-          if [[ "$asset_count" -gt 1 ]]; then
-            echo "::error::Release contains duplicate assets named $ASSET; refusing changes."
-            exit 1
-          elif [[ "$asset_count" -eq 0 ]]; then
-            UPLOAD_URL="https://uploads.github.com/repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?name=$ASSET"
+          REPAIR_ENABLED="false"
+          if [[ -n "$EXPECTED_REPAIR_SHA256" ]]; then
+            [[ -n "$REPAIR_ASSET_PATH" && "$REPAIR_ASSET_NAME" == "TIMESAVER_Update_Repair.exe" ]] || {
+              echo "::error::Repair asset path or name is missing; refusing Release changes."; exit 1;
+            }
+            [[ "$REPAIR_BYTES" =~ ^[1-9][0-9]*$ ]] || {
+              echo "::error::Repair asset byte size is invalid; refusing Release changes."; exit 1;
+            }
+            REPAIR_ENABLED="true"
+          elif [[ -n "$REPAIR_ASSET_PATH" || -n "$REPAIR_BYTES" ]]; then
+            echo "::error::Unexpected repair candidate output without approved request fields."; exit 1
+          fi
+
+          plan_args=(
+            plan
+            --release-json release.json
+            --zip-name "$ASSET"
+            --zip-bytes "$ZIP_BYTES"
+          )
+          if [[ "$REPAIR_ENABLED" == "true" ]]; then
+            plan_args+=(--repair-name "$REPAIR_ASSET_NAME" --repair-bytes "$REPAIR_BYTES" --strict)
+          fi
+          python scripts/timesaver_release_assets.py "${plan_args[@]}" > missing-assets.txt
+
+          while IFS= read -r asset_to_upload; do
+            [[ -n "$asset_to_upload" ]] || continue
+            case "$asset_to_upload" in
+              "$ASSET")
+                upload_path="$ZIP_PATH"
+                content_type="application/zip"
+                ;;
+              "$REPAIR_ASSET_NAME")
+                [[ "$REPAIR_ENABLED" == "true" ]] || {
+                  echo "::error::Unapproved repair asset upload was requested."; exit 1;
+                }
+                upload_path="$REPAIR_ASSET_PATH"
+                content_type="application/octet-stream"
+                ;;
+              *)
+                echo "::error::Release asset plan contains an unapproved filename."; exit 1
+                ;;
+            esac
+            [[ -f "$upload_path" ]] || { echo "::error::Planned Release asset is missing."; exit 1; }
+            UPLOAD_URL="https://uploads.github.com/repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?name=$asset_to_upload"
             curl --fail --silent --show-error --location \
               --header "Authorization: Bearer $GH_TOKEN" \
               --header "Accept: application/vnd.github+json" \
-              --header "Content-Type: application/zip" \
-              --data-binary "@$ZIP_PATH" \
+              --header "Content-Type: $content_type" \
+              --data-binary "@$upload_path" \
               "$UPLOAD_URL" >/dev/null
-          fi
+          done < missing-assets.txt
 
           gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" > release.json
-          asset_count="$(jq --arg name "$ASSET" '[.assets[] | select(.name == $name)] | length' release.json)"
-          if [[ "$asset_count" -ne 1 ]]; then
-            echo "::error::Expected exactly one Release asset named $ASSET; refusing modification."
+          plan_args+=(--require-all)
+          python scripts/timesaver_release_assets.py "${plan_args[@]}" > missing-after-upload.txt
+          if [[ -s missing-after-upload.txt ]]; then
+            echo "::error::Release is missing one or more required assets after upload."
             exit 1
           fi
-          ASSET_ID="$(jq -r --arg name "$ASSET" '.assets[] | select(.name == $name) | .id' release.json)"
+          DRAFT="$(jq -r .draft release.json)"
 
           mkdir -p published-asset
-          gh api -H "Accept: application/octet-stream" "repos/$RELEASE_REPOSITORY/releases/assets/$ASSET_ID" > "published-asset/$ASSET"
-          downloaded="published-asset/$ASSET"
-          actual_zip="$(sha256sum "$downloaded" | awk '{print toupper($1)}')"
-          if [[ "$actual_zip" != "${EXPECTED_ZIP_SHA256^^}" ]]; then
-            echo "::error::Release asset SHA-256 mismatch; refusing to publish or update JSON."
-            exit 1
+          verify_api_asset() {
+            local asset_name="$1"
+            local expected_hash="$2"
+            local expected_bytes="$3"
+            local count asset_id downloaded_path
+            count="$(jq --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' release.json)"
+            if [[ "$count" -ne 1 ]]; then
+              echo "::error::Expected exactly one Release asset named $asset_name; refusing modification."
+              return 1
+            fi
+            asset_id="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .id' release.json)"
+            downloaded_path="published-asset/$asset_name"
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$RELEASE_REPOSITORY/releases/assets/$asset_id" > "$downloaded_path"
+            python scripts/timesaver_release_assets.py verify \
+              "$downloaded_path" "$expected_hash" "$expected_bytes" --label "$asset_name"
+          }
+
+          verify_api_asset "$ASSET" "$EXPECTED_ZIP_SHA256" "$ZIP_BYTES"
+          if [[ "$REPAIR_ENABLED" == "true" ]]; then
+            verify_api_asset "$REPAIR_ASSET_NAME" "$EXPECTED_REPAIR_SHA256" "$REPAIR_BYTES"
           fi
-          python - "$downloaded" "$EXPECTED_EXE_SHA256" "$EXPECTED_UPDATER_SHA256" <<'PY'
+          python - "published-asset/$ASSET" "$EXPECTED_EXE_SHA256" "$EXPECTED_UPDATER_SHA256" <<'PY'
           import hashlib, sys, zipfile
           path, expected_exe, expected_updater = sys.argv[1:]
           with zipfile.ZipFile(path) as archive:
@@ -471,21 +598,45 @@ jobs:
             exit 1
           fi
 
-          URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$TAG/$ASSET"
-          for attempt in 1 2 3 4; do
-            if curl --fail --silent --show-error --location "$URL" --output "public-$ASSET"; then
-              break
+          verify_public_asset() {
+            local asset_name="$1"
+            local expected_hash="$2"
+            local expected_bytes="$3"
+            local url="https://github.com/$RELEASE_REPOSITORY/releases/download/$TAG/$asset_name"
+            local output="public-$asset_name"
+            for attempt in 1 2 3 4; do
+              if curl --fail --silent --show-error --location "$url" --output "$output"; then
+                break
+              fi
+              if [[ "$attempt" -eq 4 ]]; then
+                echo "::error::Public download failed for $asset_name; update JSON remains unchanged."
+                return 1
+              fi
+              sleep 5
+            done
+            local label="Public $asset_name"
+            if [[ "$asset_name" == "$ASSET" ]]; then
+              label="Public ZIP"
+            else
+              label="Public repair asset"
             fi
-            if [[ "$attempt" -eq 4 ]]; then
-              echo "::error::Public Release ZIP download failed; update JSON remains unchanged."
-              exit 1
-            fi
-            sleep 5
-          done
+            python scripts/timesaver_release_assets.py verify "$output" "$expected_hash" "$expected_bytes" --label "$label"
+          }
+
+          verify_public_asset "$ASSET" "$EXPECTED_ZIP_SHA256" "$ZIP_BYTES"
           public_hash="$(sha256sum "public-$ASSET" | awk '{print toupper($1)}')"
           if [[ "$public_hash" != "${EXPECTED_ZIP_SHA256^^}" ]]; then
             echo "::error::Public ZIP SHA-256 mismatch; update JSON remains unchanged."
             exit 1
+          fi
+          if [[ "$REPAIR_ENABLED" == "true" ]]; then
+            verify_public_asset "$REPAIR_ASSET_NAME" "$EXPECTED_REPAIR_SHA256" "$REPAIR_BYTES"
+            repair_public_hash="$(sha256sum "public-$REPAIR_ASSET_NAME" | awk '{print toupper($1)}')"
+            if [[ "$repair_public_hash" != "${EXPECTED_REPAIR_SHA256^^}" ]]; then
+              echo "::error::Public repair asset SHA-256 mismatch; update JSON remains unchanged."
+              exit 1
+            fi
+            echo "PUBLIC_REPAIR_ASSET_SHA256=$repair_public_hash"
           fi
           python - "public-$ASSET" "$EXPECTED_EXE_SHA256" "$EXPECTED_UPDATER_SHA256" <<'PY'
           import hashlib, sys, zipfile

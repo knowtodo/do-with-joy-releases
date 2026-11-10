@@ -49,6 +49,15 @@
 
 새 요청 파일 또는 검증된 재시도 파일의 push 한 번이 기존 publisher의 검증·공개 절차를 시작합니다. 게시 전에 source run/commit, manifest, ZIP 구성 및 세 SHA-256을 확인하고, 소스 Secret 부재나 검증 실패 시 Release 변경 없이 중단합니다. 공개 Release ZIP 재다운로드와 해시 검증이 성공한 뒤에만 `TIMESAVER_update.json`을 갱신합니다.
 
+### 선택적 별도 복구 도구 자산
+
+구형 후보 요청의 스키마와 동작은 그대로 유지됩니다. 별도 복구 실행 파일을 포함하는 신규 요청에만 다음 두 문자열 필드를 함께 추가할 수 있습니다.
+
+- `expected_repair_sha256`: 후보 Artifact에 실제 포함된 `TIMESAVER_Update_Repair.exe`의 승인된 SHA-256
+- `expected_repair_bytes`: 같은 파일의 승인된 양의 바이트 크기(10진 문자열)
+
+두 필드는 모두 없거나 모두 유효해야 합니다. 배포 요청 검증은 후보 파일 자체의 크기와 SHA-256을 요청값과 대조하고 Manifest 값도 일치하는지 확인합니다. Release 자산은 일반 ZIP과 분리 게시되며, ZIP 내부 구성은 기존처럼 `TIMESAVER.exe`, `Updater.exe` 두 파일만 허용합니다. 기존 Draft의 자산 목록과 파일 크기를 검사해 누락된 자산만 이어 올리고, 이미 있는 자산을 덮어쓰지 않습니다. 두 자산의 API 다운로드와 공개 다운로드가 모두 기대 크기·SHA-256을 통과하기 전에는 업데이트 JSON을 변경하지 않습니다.
+
 ### 기존 수동 실행
 
 비상시 Actions → **Publish TIMESAVER release** → **Run workflow** → branch `main`으로 실행할 수 있으며, 기존 입력/검증 단계를 그대로 사용합니다.
