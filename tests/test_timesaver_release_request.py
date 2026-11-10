@@ -1,4 +1,6 @@
+import hashlib
 import json
+import tempfile
 import unittest
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -14,10 +16,21 @@ from scripts.resolve_timesaver_release_request import (
     validate_retry_sequence,
     _original_public_version_for_request,
 )
+from scripts.timesaver_release_assets import (
+    AssetValidationError,
+    REPAIR_ASSET_NAME,
+    expected_candidate_file_names,
+    parse_optional_repair_expectations,
+    release_asset_upload_plan,
+    validate_candidate_file_set,
+    verify_file,
+)
 
 ZIP_SHA = "C78E1A8FC2546A40327C701E8E6DDB461DC679A322AD900EAA741405B1808B2D"
 EXE_SHA = "FC0E418D431D753A3C920199F61868B63B74003CFBAA44A5A9794D905820F333"
 UPDATER_SHA = "CEB28ED1E8DFDE50FD1BD8511DE9D05900D4F3C98339AA2D55CEFBC6F49CD498"
+REPAIR_SHA = "1FE157DE76AFF90D7F26B24E740E5FF52A0FA13AC1D4C6A5E4C452EDC73DD98C"
+REPAIR_BYTES = "12033031"
 
 
 def valid_values():
@@ -49,7 +62,62 @@ def public_json(request):
 
 class ReleaseRequestTests(unittest.TestCase):
     def test_valid_dispatch_inputs_resolve(self):
-        self.assertEqual(request_from_dispatch(valid_values())["version"], "1.1.6")
+        resolved = request_from_dispatch(valid_values())
+        self.assertEqual(resolved["version"], "1.1.6")
+        self.assertEqual(resolved["expected_repair_sha256"], "")
+        self.assertEqual(resolved["expected_repair_bytes"], "")
+
+    def test_optional_repair_request_schema_is_validated_as_a_pair(self):
+        values = valid_values()
+        values.update({
+            "version": "1.1.8",
+            "source_run_id": "42792550252",
+            "artifact_name": "TIMESAVER-1.1.8-RELEASE-CANDIDATE",
+            "expected_repair_sha256": REPAIR_SHA,
+            "expected_repair_bytes": REPAIR_BYTES,
+        })
+        request = request_from_dispatch(values)
+        self.assertEqual(request["expected_repair_sha256"], REPAIR_SHA.lower())
+        self.assertEqual(request["expected_repair_bytes"], REPAIR_BYTES)
+
+        for field, value in (
+            ("expected_repair_sha256", ""),
+            ("expected_repair_bytes", "0"),
+            ("expected_repair_sha256", "not-a-hash"),
+        ):
+            invalid = dict(values)
+            invalid[field] = value
+            with self.assertRaises(RequestError):
+                request_from_dispatch(invalid)
+
+    def test_repair_retry_must_match_original_hash_and_size(self):
+        values = valid_values()
+        values.update({
+            "version": "1.1.8",
+            "source_run_id": "42792550252",
+            "artifact_name": "TIMESAVER-1.1.8-RELEASE-CANDIDATE",
+            "expected_repair_sha256": REPAIR_SHA,
+            "expected_repair_bytes": REPAIR_BYTES,
+        })
+        original = json.dumps({"application": "timesaver", **values})
+        self.assertEqual(
+            request_from_push(
+                "release-requests/timesaver/retries/1.1.8-1.json",
+                original,
+                original_request_json=original,
+                prior_retry_paths=[],
+            ),
+            request_from_dispatch(values),
+        )
+        changed = dict(values)
+        changed["expected_repair_sha256"] = "0" * 64
+        with self.assertRaises(RequestError):
+            request_from_push(
+                "release-requests/timesaver/retries/1.1.8-1.json",
+                json.dumps({"application": "timesaver", **changed}),
+                original_request_json=original,
+                prior_retry_paths=[],
+            )
 
     def test_new_request_file_resolves(self):
         request = request_from_dispatch(valid_values())
@@ -66,7 +134,7 @@ class ReleaseRequestTests(unittest.TestCase):
                 original_request_json=raw,
                 prior_retry_paths=[],
             ),
-            {"application": "timesaver", **valid_values()},
+            request_from_dispatch(valid_values()),
         )
 
     def test_retry_requires_the_original_request_file(self):
@@ -236,6 +304,119 @@ class ReleaseRequestTests(unittest.TestCase):
         with self.assertRaises(RequestError):
             ensure_version_allowed({**current, "sha256": "0" * 64}, request, run_attempt="2")
         self.assertEqual(ensure_version_allowed(current, request, run_attempt="2"), "already-current")
+
+
+class ReleaseAssetValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_legacy_and_repair_candidate_file_sets_are_versioned_exactly(self):
+        legacy_root = self.root / "legacy"
+        legacy_root.mkdir()
+        legacy_names = expected_candidate_file_names("1.1.7", include_repair=False)
+        for name in legacy_names:
+            (legacy_root / name).write_bytes(b"candidate")
+        self.assertNotIn(REPAIR_ASSET_NAME, legacy_names)
+        self.assertEqual(set(validate_candidate_file_set(legacy_root, legacy_names)), legacy_names)
+
+        repair_root = self.root / "repair"
+        repair_root.mkdir()
+        repair_names = expected_candidate_file_names("1.1.8", include_repair=True)
+        for name in repair_names:
+            (repair_root / name).write_bytes(b"candidate")
+        self.assertIn(REPAIR_ASSET_NAME, repair_names)
+        self.assertEqual(set(validate_candidate_file_set(repair_root, repair_names)), repair_names)
+
+    def test_missing_or_unapproved_candidate_files_are_rejected(self):
+        expected = expected_candidate_file_names("1.1.8", include_repair=True)
+        for name in expected - {REPAIR_ASSET_NAME}:
+            (self.root / name).write_bytes(b"candidate")
+        with self.assertRaises(AssetValidationError):
+            validate_candidate_file_set(self.root, expected)
+        (self.root / REPAIR_ASSET_NAME).write_bytes(b"candidate")
+        (self.root / "unauthorized.exe").write_bytes(b"not approved")
+        with self.assertRaises(AssetValidationError):
+            validate_candidate_file_set(self.root, expected)
+
+    def test_repair_file_hash_and_size_are_checked_against_actual_bytes(self):
+        data = b"standalone repair executable fixture"
+        path = self.root / REPAIR_ASSET_NAME
+        path.write_bytes(data)
+        digest = hashlib.sha256(data).hexdigest()
+        self.assertEqual(verify_file(path, digest.upper(), len(data), REPAIR_ASSET_NAME), digest)
+        with self.assertRaises(AssetValidationError):
+            verify_file(path, "0" * 64, len(data), REPAIR_ASSET_NAME)
+        with self.assertRaises(AssetValidationError):
+            verify_file(path, digest, len(data) + 1, REPAIR_ASSET_NAME)
+        with self.assertRaises(AssetValidationError):
+            verify_file(self.root / "missing.exe", digest, len(data), REPAIR_ASSET_NAME)
+
+    def test_draft_reuse_and_partial_upload_retries_only_plan_missing_assets(self):
+        expected = {"TIMESAVER-1.1.8.zip": 124495365, REPAIR_ASSET_NAME: 12033031}
+        zip_only = [{"name": "TIMESAVER-1.1.8.zip", "size": 124495365}]
+        repair_only = [{"name": REPAIR_ASSET_NAME, "size": 12033031}]
+        complete = [
+            {"name": "TIMESAVER-1.1.8.zip", "size": 124495365},
+            {"name": REPAIR_ASSET_NAME, "size": 12033031},
+        ]
+        self.assertEqual(
+            release_asset_upload_plan(zip_only, expected, reject_unexpected=True),
+            [REPAIR_ASSET_NAME],
+        )
+        self.assertEqual(
+            release_asset_upload_plan(repair_only, expected, reject_unexpected=True),
+            ["TIMESAVER-1.1.8.zip"],
+        )
+        self.assertEqual(
+            release_asset_upload_plan(complete, expected, reject_unexpected=True),
+            [],
+        )
+
+    def test_duplicate_wrong_size_and_unapproved_assets_fail_without_overwrite(self):
+        expected = {"TIMESAVER-1.1.8.zip": 124495365, REPAIR_ASSET_NAME: 12033031}
+        with self.assertRaises(AssetValidationError):
+            release_asset_upload_plan(
+                [
+                    {"name": "TIMESAVER-1.1.8.zip", "size": 124495365},
+                    {"name": "TIMESAVER-1.1.8.zip", "size": 124495365},
+                ],
+                expected,
+                reject_unexpected=True,
+            )
+        with self.assertRaises(AssetValidationError):
+            release_asset_upload_plan(
+                [{"name": REPAIR_ASSET_NAME, "size": 1}],
+                expected,
+                reject_unexpected=True,
+            )
+        with self.assertRaises(AssetValidationError):
+            release_asset_upload_plan(
+                [{"name": "unexpected.exe", "size": 1}],
+                expected,
+                reject_unexpected=True,
+            )
+        self.assertEqual(
+            release_asset_upload_plan(
+                [{"name": "legacy-extra.txt", "size": 10}],
+                {"TIMESAVER-1.1.7.zip": 100},
+            ),
+            ["TIMESAVER-1.1.7.zip"],
+        )
+
+    def test_optional_repair_expectations_accept_only_both_empty_or_both_valid(self):
+        self.assertIsNone(parse_optional_repair_expectations("", ""))
+        self.assertEqual(
+            parse_optional_repair_expectations(REPAIR_SHA, REPAIR_BYTES),
+            (REPAIR_SHA.lower(), int(REPAIR_BYTES)),
+        )
+        with self.assertRaises(AssetValidationError):
+            parse_optional_repair_expectations(REPAIR_SHA, "")
+        with self.assertRaises(AssetValidationError):
+            parse_optional_repair_expectations("", REPAIR_BYTES)
 
 
 if __name__ == "__main__":

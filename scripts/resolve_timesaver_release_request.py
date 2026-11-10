@@ -9,7 +9,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-REQUEST_KEYS = {
+from scripts.timesaver_release_assets import AssetValidationError, parse_optional_repair_expectations
+
+REQUIRED_REQUEST_KEYS = {
     "application",
     "version",
     "source_repository",
@@ -21,6 +23,8 @@ REQUEST_KEYS = {
     "expected_updater_sha256",
     "release_notes",
 }
+OPTIONAL_REPAIR_KEYS = {"expected_repair_sha256", "expected_repair_bytes"}
+REQUEST_KEYS = REQUIRED_REQUEST_KEYS | OPTIONAL_REPAIR_KEYS
 VERSION_PATTERN = r"(?:0|[1-9][0-9]{0,8})[.](?:0|[1-9][0-9]{0,8})[.](?:0|[1-9][0-9]{0,8})"
 VERSION_RE = re.compile(VERSION_PATTERN)
 RETRY_PATH_RE = re.compile(
@@ -39,6 +43,8 @@ OUTPUT_FIELDS = (
     "expected_exe_sha256",
     "expected_updater_sha256",
     "release_notes",
+    "expected_repair_sha256",
+    "expected_repair_bytes",
 )
 
 
@@ -56,7 +62,10 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def validate_request(data: Any, request_path: str | None = None) -> dict[str, str]:
-    if not isinstance(data, dict) or set(data) != REQUEST_KEYS:
+    if not isinstance(data, dict):
+        raise RequestError("Release request fields do not match the required schema.")
+    data_keys = set(data)
+    if data_keys not in (REQUIRED_REQUEST_KEYS, REQUEST_KEYS):
         raise RequestError("Release request fields do not match the required schema.")
     if data["application"] != "timesaver":
         raise RequestError("Release request application must be timesaver.")
@@ -86,7 +95,17 @@ def validate_request(data: Any, request_path: str | None = None) -> dict[str, st
     notes = data["release_notes"]
     if not isinstance(notes, str) or not notes.strip() or len(notes) > 4000 or chr(0) in notes:
         raise RequestError("Release notes must be non-empty text of at most 4000 characters.")
-    return data
+    try:
+        repair = parse_optional_repair_expectations(
+            data.get("expected_repair_sha256", ""),
+            data.get("expected_repair_bytes", ""),
+        )
+    except AssetValidationError as exc:
+        raise RequestError(str(exc)) from exc
+    normalized = dict(data)
+    normalized["expected_repair_sha256"] = repair[0] if repair else ""
+    normalized["expected_repair_bytes"] = str(repair[1]) if repair else ""
+    return normalized
 
 
 def parse_push_changes(name_status: str) -> str:
@@ -299,6 +318,8 @@ def _request_from_environment() -> tuple[dict[str, Any], bool, str]:
             "expected_exe_sha256": "DISPATCH_EXPECTED_EXE_SHA256",
             "expected_updater_sha256": "DISPATCH_EXPECTED_UPDATER_SHA256",
             "release_notes": "DISPATCH_RELEASE_NOTES",
+            "expected_repair_sha256": "DISPATCH_EXPECTED_REPAIR_SHA256",
+            "expected_repair_bytes": "DISPATCH_EXPECTED_REPAIR_BYTES",
         }
         request = request_from_dispatch({key: os.environ.get(env_name, "") for key, env_name in names.items()})
         return request, False, ""
