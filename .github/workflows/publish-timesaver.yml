@@ -114,6 +114,18 @@ jobs:
           assert source.index("Download private source candidate artifact") < source.index("Create or safely reuse draft Release and asset")
           assert source.index("Public ZIP SHA-256 mismatch") < source.index("Update or verify update JSON")
           assert "asset_count" in source and "refusing modification" in source
+          assert "RESOLVED_RETRY_REQUEST" in source and "RESOLVED_RETRY_BASELINE_VERSION" in source
+          assert "release-requests/timesaver/retries" in source
+          release_start = source.index("      - name: Create or safely reuse draft Release and asset\n")
+          json_start = source.index("      - name: Update or verify update JSON after public ZIP validation\n")
+          release_logic = source[release_start:json_start]
+          assert "find_release_by_tag()" in release_logic and "releases/$RELEASE_ID" in release_logic
+          assert 'if [[ "$asset_count" -gt 1 ]]' in release_logic
+          assert 'elif [[ "$asset_count" -eq 0 ]]' in release_logic
+          assert "releases/assets/$ASSET_ID" in release_logic and "uploads.github.com" in release_logic
+          assert "releases?per_page=100" in source and "releases/assets/$ASSET_ID" in source
+          assert "uploads.github.com" in source and "--data-binary \"@$ZIP_PATH\"" in source
+          assert "gh release upload \"$TAG\"" not in source and "gh release download \"$TAG\"" not in source
           assert "refusing to publish or update JSON" in source
           print("WORKFLOW_TRIGGERS_AND_RELEASE_GATES=PASS")
           PY
@@ -191,6 +203,8 @@ jobs:
           RESOLVED_EXPECTED_EXE_SHA256: ${{ steps.release_request.outputs.expected_exe_sha256 }}
           RESOLVED_EXPECTED_UPDATER_SHA256: ${{ steps.release_request.outputs.expected_updater_sha256 }}
           RESOLVED_RELEASE_NOTES: ${{ steps.release_request.outputs.release_notes }}
+          RESOLVED_RETRY_REQUEST: ${{ steps.release_request.outputs.retry_request }}
+          RESOLVED_RETRY_BASELINE_VERSION: ${{ steps.release_request.outputs.retry_baseline_version }}
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location "https://raw.githubusercontent.com/$RELEASE_REPOSITORY/main/TIMESAVER_update.json" --output current-public-json.json
@@ -361,41 +375,72 @@ jobs:
           TAG="timesaver-v$VERSION"
           ASSET="TIMESAVER-$VERSION.zip"
           TITLE="TIMESAVER $VERSION"
-          if gh api "repos/$RELEASE_REPOSITORY/releases/tags/$TAG" > release.json 2>/dev/null; then
-            python - "$TAG" "$TITLE" "$RELEASE_NOTES" release.json <<'PY'
+
+          find_release_by_tag() {
+            gh api --paginate --slurp "repos/$RELEASE_REPOSITORY/releases?per_page=100" > releases.json
+            python - "$TAG" "$TITLE" "$RELEASE_NOTES" releases.json <<'PY'
           import json, sys
           tag, title, notes, path = sys.argv[1:]
-          data = json.load(open(path, encoding="utf-8"))
-          if data.get("tag_name") != tag or data.get("name") != title:
+          pages = json.load(open(path, encoding="utf-8"))
+          releases = [release for page in pages for release in (page if isinstance(page, list) else [page])]
+          matches = [release for release in releases if release.get("tag_name") == tag]
+          if not matches:
+              sys.exit(3)
+          if len(matches) != 1:
+              raise SystemExit("Multiple Releases have this tag; refusing modification.")
+          data = matches[0]
+          if data.get("name") != title:
               raise SystemExit("An existing Release has a different tag or title; refusing modification.")
           body = (data.get("body") or "").replace("\r\n", "\n").strip()
           expected_body = notes.replace("\r\n", "\n").strip()
           if body != expected_body:
               raise SystemExit("An existing Release has different notes; refusing modification.")
+          with open("release.json", "w", encoding="utf-8") as output:
+              json.dump(data, output)
           PY
-            RELEASE_ID="$(jq -r .id release.json)"
-            DRAFT="$(jq -r .draft release.json)"
+          }
+
+          if find_release_by_tag; then
+            :
           else
+            lookup_status=$?
+            if [[ "$lookup_status" -ne 3 ]]; then
+              exit "$lookup_status"
+            fi
             if gh api "repos/$RELEASE_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
               gh release create "$TAG" --repo "$RELEASE_REPOSITORY" --draft --verify-tag --title "$TITLE" --notes "$RELEASE_NOTES"
             else
               gh release create "$TAG" --repo "$RELEASE_REPOSITORY" --draft --target main --title "$TITLE" --notes "$RELEASE_NOTES"
             fi
-            gh api "repos/$RELEASE_REPOSITORY/releases/tags/$TAG" > release.json
-            RELEASE_ID="$(jq -r .id release.json)"
-            DRAFT="$(jq -r .draft release.json)"
+            find_release_by_tag
           fi
 
+          RELEASE_ID="$(jq -r .id release.json)"
+          DRAFT="$(jq -r .draft release.json)"
           asset_count="$(jq --arg name "$ASSET" '[.assets[] | select(.name == $name)] | length' release.json)"
           if [[ "$asset_count" -gt 1 ]]; then
             echo "::error::Release contains duplicate assets named $ASSET; refusing changes."
             exit 1
           elif [[ "$asset_count" -eq 0 ]]; then
-            gh release upload "$TAG" "$ZIP_PATH" --repo "$RELEASE_REPOSITORY"
+            UPLOAD_URL="https://uploads.github.com/repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID/assets?name=$ASSET"
+            curl --fail --silent --show-error --location \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              --header "Content-Type: application/zip" \
+              --data-binary "@$ZIP_PATH" \
+              "$UPLOAD_URL" >/dev/null
           fi
 
+          gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" > release.json
+          asset_count="$(jq --arg name "$ASSET" '[.assets[] | select(.name == $name)] | length' release.json)"
+          if [[ "$asset_count" -ne 1 ]]; then
+            echo "::error::Expected exactly one Release asset named $ASSET; refusing modification."
+            exit 1
+          fi
+          ASSET_ID="$(jq -r --arg name "$ASSET" '.assets[] | select(.name == $name) | .id' release.json)"
+
           mkdir -p published-asset
-          gh release download "$TAG" --repo "$RELEASE_REPOSITORY" --pattern "$ASSET" --dir published-asset
+          gh api -H "Accept: application/octet-stream" "repos/$RELEASE_REPOSITORY/releases/assets/$ASSET_ID" > "published-asset/$ASSET"
           downloaded="published-asset/$ASSET"
           actual_zip="$(sha256sum "$downloaded" | awk '{print toupper($1)}')"
           if [[ "$actual_zip" != "${EXPECTED_ZIP_SHA256^^}" ]]; then
@@ -421,8 +466,8 @@ jobs:
             gh api --method PATCH "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" -F draft=false >/dev/null
           fi
           gh api "repos/$RELEASE_REPOSITORY/releases/$RELEASE_ID" > release.json
-          if [[ "$(jq -r .draft release.json)" != "false" ]]; then
-            echo "::error::Release did not become public; refusing JSON update."
+          if [[ "$(jq -r .draft release.json)" != "false" || "$(jq -r .tag_name release.json)" != "$TAG" ]]; then
+            echo "::error::Release did not become public with the expected tag; refusing JSON update."
             exit 1
           fi
 
