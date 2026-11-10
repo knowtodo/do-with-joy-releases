@@ -47,7 +47,7 @@
 }
 ```
 
-새 요청 파일의 push 한 번이 기존 publisher의 검증·공개 절차를 시작합니다. 게시 전에 source run/commit, manifest, ZIP 구성 및 세 SHA-256을 확인하고, 소스 Secret 부재나 검증 실패 시 Release 변경 없이 중단합니다. 공개 Release ZIP 재다운로드와 해시 검증이 성공한 뒤에만 `TIMESAVER_update.json`을 갱신합니다.
+새 요청 파일 또는 검증된 재시도 파일의 push 한 번이 기존 publisher의 검증·공개 절차를 시작합니다. 게시 전에 source run/commit, manifest, ZIP 구성 및 세 SHA-256을 확인하고, 소스 Secret 부재나 검증 실패 시 Release 변경 없이 중단합니다. 공개 Release ZIP 재다운로드와 해시 검증이 성공한 뒤에만 `TIMESAVER_update.json`을 갱신합니다.
 
 ### 기존 수동 실행
 
@@ -58,7 +58,10 @@
 - 동일한 배포 요청 파일을 수정/삭제하는 push와 두 개 이상의 변경 파일은 거부합니다.
 - 요청 버전이 현재 JSON보다 낮으면 거부합니다. 이미 공개된 동일 버전은 새 실행에서 거부되며, 동일한 완료 run의 재시도만 JSON 값이 완전히 동일할 때 무변경 통과합니다.
 - 같은 tag/Release가 있더라도 notes, asset 및 SHA-256이 기대값과 다르면 덮어쓰지 않고 중단합니다. 일치하는 중간 상태는 기존 workflow의 복구 로직이 안전하게 재사용합니다.
-- 실패 뒤에는 Actions의 동일 run 재실행을 사용합니다. 이미 update JSON까지 게시된 버전을 새 request commit으로 재배포하지 않습니다.
+- push 요청 실패 뒤 같은 run을 재실행하면 그 run이 참조한 과거 workflow가 다시 사용될 수 있습니다. 복구할 때는 기존 배포 요청을 수정하지 말고 \`release-requests/timesaver/retries/X.Y.Z-N.json\`을 단일 신규 파일로 추가합니다.
+- 재시도 JSON은 원본 \`release-requests/timesaver/X.Y.Z.json\`과 모든 필드 및 해시가 정확히 같아야 하며 인증정보를 포함할 수 없습니다. N은 해당 버전의 다음 순번이어야 합니다.
+- 재시도는 원본 배포 요청이 처음 추가되기 직전의 공개 버전이 아직 현재와 같을 때만 허용됩니다. 이미 목표 버전이 공개됐거나 원본 요청과 값이 다르면 중단합니다.
+- 재시도 요청의 push는 기존 \`release-requests/timesaver/**\` 경로 필터와 현재 main의 workflow를 사용하므로 새 workflow나 수동 Actions 실행이 필요하지 않습니다. 이미 update JSON까지 게시된 버전을 다시 배포하지 않습니다.
 - 공개 JSON 내용, blob SHA와 이전 commit 기록은 기존 publisher의 Actions summary/Git history에 유지됩니다.
 
 ## 향후 패치

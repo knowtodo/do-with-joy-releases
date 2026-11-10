@@ -21,7 +21,11 @@ REQUEST_KEYS = {
     "expected_updater_sha256",
     "release_notes",
 }
-VERSION_RE = re.compile(r"(0|[1-9][0-9]{0,8})[.](0|[1-9][0-9]{0,8})[.](0|[1-9][0-9]{0,8})")
+VERSION_PATTERN = r"(?:0|[1-9][0-9]{0,8})[.](?:0|[1-9][0-9]{0,8})[.](?:0|[1-9][0-9]{0,8})"
+VERSION_RE = re.compile(VERSION_PATTERN)
+RETRY_PATH_RE = re.compile(
+    rf"release-requests/timesaver/retries/(?P<version>{VERSION_PATTERN})-(?P<number>[1-9][0-9]*)[.]json"
+)
 COMMIT_RE = re.compile(r"[0-9a-fA-F]{40}")
 HASH_RE = re.compile(r"[0-9a-fA-F]{64}")
 RUN_ID_RE = re.compile(r"[1-9][0-9]*")
@@ -113,12 +117,81 @@ def request_from_dispatch(values: dict[str, str]) -> dict[str, str]:
     return validate_request(data)
 
 
-def request_from_push(path: str, raw_json: str) -> dict[str, str]:
+def _decode_request_json(raw_json: str) -> dict[str, Any]:
     try:
         data = json.loads(raw_json, object_pairs_hook=_unique_object)
     except (json.JSONDecodeError, UnicodeError) as exc:
         raise RequestError("Release request file is not valid UTF-8 JSON.") from exc
-    return validate_request(data, request_path=path)
+    if not isinstance(data, dict):
+        raise RequestError("Release request JSON must be an object.")
+    return data
+
+
+def validate_retry_sequence(retry_path: str, prior_retry_paths: list[str]) -> None:
+    match = RETRY_PATH_RE.fullmatch(retry_path)
+    if match is None:
+        raise RequestError("Retry request path must be retries/X.Y.Z-N.json.")
+    version = match.group("version")
+    attempt = int(match.group("number"))
+    prior_numbers: list[int] = []
+    for prior_path in prior_retry_paths:
+        prior_match = RETRY_PATH_RE.fullmatch(prior_path)
+        if prior_match is None:
+            raise RequestError("An existing retry request has an invalid path.")
+        if prior_match.group("version") == version:
+            prior_numbers.append(int(prior_match.group("number")))
+    if len(prior_numbers) != len(set(prior_numbers)):
+        raise RequestError("Duplicate retry attempt numbers already exist.")
+    if sorted(prior_numbers) != list(range(1, len(prior_numbers) + 1)):
+        raise RequestError("Existing retry attempts are not sequential.")
+    if attempt != len(prior_numbers) + 1:
+        raise RequestError("Retry request must use the next unused sequential attempt number.")
+
+
+def request_from_retry(
+    retry_path: str,
+    raw_json: str,
+    *,
+    original_request_json: str,
+    prior_retry_paths: list[str],
+) -> dict[str, Any]:
+    match = RETRY_PATH_RE.fullmatch(retry_path)
+    if match is None:
+        raise RequestError("Retry request path must be retries/X.Y.Z-N.json.")
+    retry_data = validate_request(_decode_request_json(raw_json))
+    if retry_data["version"] != match.group("version"):
+        raise RequestError("Retry request path version does not match its payload.")
+    validate_retry_sequence(retry_path, prior_retry_paths)
+
+    original_path = f"release-requests/timesaver/{match.group('version')}.json"
+    original_data = request_from_push(original_path, original_request_json)
+    if retry_data != original_data:
+        raise RequestError("Retry request fields must exactly match the original deployment request.")
+    return retry_data
+
+
+def request_from_push(
+    path: str,
+    raw_json: str,
+    *,
+    original_request_json: str | None = None,
+    prior_retry_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    retry_match = RETRY_PATH_RE.fullmatch(path)
+    if retry_match is not None:
+        if original_request_json is None:
+            original_path = f"release-requests/timesaver/{retry_match.group('version')}.json"
+            try:
+                original_request_json = Path(original_path).read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                raise RequestError("Original deployment request is missing or unreadable.") from exc
+        return request_from_retry(
+            path,
+            raw_json,
+            original_request_json=original_request_json,
+            prior_retry_paths=prior_retry_paths or [],
+        )
+    return validate_request(_decode_request_json(raw_json), request_path=path)
 
 
 def version_tuple(value: str) -> tuple[int, int, int]:
@@ -139,11 +212,20 @@ def ensure_version_allowed(
     request: dict[str, str],
     *,
     run_attempt: str,
+    retry_baseline_version: str | None = None,
 ) -> str:
     if not isinstance(current_json, dict):
         raise RequestError("Current public update JSON must be an object.")
     current_version = version_tuple(current_json.get("version"))
     requested_version = version_tuple(request["version"])
+    if retry_baseline_version is not None:
+        baseline_version = version_tuple(retry_baseline_version)
+        if current_version != baseline_version:
+            raise RequestError(
+                "Retry is allowed only while the public version matches the original request baseline."
+            )
+        if baseline_version >= requested_version:
+            raise RequestError("Retry baseline must be older than the requested version.")
     if current_version > requested_version:
         raise RequestError("Current public version is newer; refusing a downgrade.")
 
@@ -166,7 +248,45 @@ def ensure_version_allowed(
     return "new-version"
 
 
-def _request_from_environment() -> dict[str, str]:
+def _original_public_version_for_request(version: str) -> str:
+    request_path = f"release-requests/timesaver/{version}.json"
+    additions = subprocess.run(
+        ["git", "log", "--diff-filter=A", "--format=%H", "--", request_path],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.splitlines()
+    if len(additions) != 1:
+        raise RequestError("Original deployment request must have exactly one addition commit.")
+    parent = subprocess.run(
+        ["git", "rev-parse", f"{additions[0]}^"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+    raw = subprocess.run(
+        ["git", "show", f"{parent}:TIMESAVER_update.json"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout
+    try:
+        prior_json = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise RequestError("Could not read the public-version baseline from the original request parent.") from exc
+    if not isinstance(prior_json, dict) or prior_json.get("app_id") != "timesaver":
+        raise RequestError("Original request parent has an invalid TIMESAVER update JSON.")
+    baseline = prior_json.get("version")
+    version_tuple(baseline)
+    if version_tuple(baseline) >= version_tuple(version):
+        raise RequestError("Original request was not newer than its recorded public-version baseline.")
+    return baseline
+
+
+def _request_from_environment() -> tuple[dict[str, Any], bool, str]:
     event_name = os.environ.get("REQUEST_EVENT_NAME", "")
     if event_name == "workflow_dispatch":
         names = {
@@ -180,7 +300,8 @@ def _request_from_environment() -> dict[str, str]:
             "expected_updater_sha256": "DISPATCH_EXPECTED_UPDATER_SHA256",
             "release_notes": "DISPATCH_RELEASE_NOTES",
         }
-        return request_from_dispatch({key: os.environ.get(env_name, "") for key, env_name in names.items()})
+        request = request_from_dispatch({key: os.environ.get(env_name, "") for key, env_name in names.items()})
+        return request, False, ""
 
     if event_name != "push":
         raise RequestError("Only workflow_dispatch and main release-request pushes are accepted.")
@@ -205,10 +326,31 @@ def _request_from_environment() -> dict[str, str]:
         raw = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise RequestError("Release request file could not be read as UTF-8.") from exc
-    return request_from_push(path, raw)
+
+    if RETRY_PATH_RE.fullmatch(path):
+        prior = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", before, "--", "release-requests/timesaver/retries"],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.splitlines()
+        request = request_from_push(path, raw, prior_retry_paths=prior)
+        baseline = _original_public_version_for_request(request["version"])
+        return request, True, baseline
+
+    return request_from_push(path, raw), False, ""
 
 
-def write_outputs(request: dict[str, str], output_path: str) -> None:
+
+
+def write_outputs(
+    request: dict[str, str],
+    output_path: str,
+    *,
+    is_retry: bool = False,
+    retry_baseline_version: str = "",
+) -> None:
     newline = chr(10)
     with open(output_path, "a", encoding="utf-8", newline="") as output:
         for key in OUTPUT_FIELDS:
@@ -222,6 +364,8 @@ def write_outputs(request: dict[str, str], output_path: str) -> None:
             while delimiter in value:
                 delimiter = f"NOTES_{uuid.uuid4().hex}"
             output.write(f"{key}<<{delimiter}{newline}{value}{newline}{delimiter}{newline}")
+        output.write(f"retry_request={str(is_retry).lower()}{newline}")
+        output.write(f"retry_baseline_version={retry_baseline_version}{newline}")
 
 
 def check_public_version(path: str) -> str:
@@ -233,7 +377,20 @@ def check_public_version(path: str) -> str:
     attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
     if not RUN_ID_RE.fullmatch(attempt):
         raise RequestError("GitHub Actions run attempt is invalid.")
-    return ensure_version_allowed(current_json, request, run_attempt=attempt)
+    retry_flag = os.environ.get("RESOLVED_RETRY_REQUEST", "false").lower()
+    retry_baseline = os.environ.get("RESOLVED_RETRY_BASELINE_VERSION", "")
+    if retry_flag not in {"true", "false"}:
+        raise RequestError("Retry request marker is invalid.")
+    if retry_flag == "true" and not retry_baseline:
+        raise RequestError("Retry request is missing its original public-version baseline.")
+    if retry_flag == "false" and retry_baseline:
+        raise RequestError("A normal deployment request must not contain a retry baseline.")
+    return ensure_version_allowed(
+        current_json,
+        request,
+        run_attempt=attempt,
+        retry_baseline_version=retry_baseline if retry_flag == "true" else None,
+    )
 
 
 def main() -> int:
@@ -247,12 +404,18 @@ def main() -> int:
 
         if len(sys.argv) != 1:
             raise RequestError("Unexpected command-line arguments.")
-        request = _request_from_environment()
+        request, is_retry, retry_baseline_version = _request_from_environment()
         output_path = os.environ.get("GITHUB_OUTPUT")
         if not output_path:
             raise RequestError("GitHub Actions output path is unavailable.")
-        write_outputs(request, output_path)
-        print(f"Validated TIMESAVER {request['version']} release request.")
+        write_outputs(
+            request,
+            output_path,
+            is_retry=is_retry,
+            retry_baseline_version=retry_baseline_version,
+        )
+        request_kind = "retry" if is_retry else "release"
+        print(f"Validated TIMESAVER {request['version']} {request_kind} request.")
         return 0
     except RequestError as exc:
         print(f"::error::{exc}", file=sys.stderr)

@@ -1,5 +1,7 @@
 import json
 import unittest
+from subprocess import CompletedProcess
+from unittest.mock import patch
 
 from scripts.resolve_timesaver_release_request import (
     RequestError,
@@ -8,6 +10,8 @@ from scripts.resolve_timesaver_release_request import (
     request_from_dispatch,
     request_from_push,
     validate_push_context,
+    validate_retry_sequence,
+    _original_public_version_for_request,
 )
 
 ZIP_SHA = "C78E1A8FC2546A40327C701E8E6DDB461DC679A322AD900EAA741405B1808B2D"
@@ -51,6 +55,95 @@ class ReleaseRequestTests(unittest.TestCase):
         raw = json.dumps({"application": "timesaver", **request})
         parsed = request_from_push("release-requests/timesaver/1.1.6.json", raw)
         self.assertEqual(parsed, request)
+
+    def test_failed_release_retry_matches_original_request_exactly(self):
+        raw = json.dumps({"application": "timesaver", **valid_values()})
+        self.assertEqual(
+            request_from_push(
+                "release-requests/timesaver/retries/1.1.6-1.json",
+                raw,
+                original_request_json=raw,
+                prior_retry_paths=[],
+            ),
+            {"application": "timesaver", **valid_values()},
+        )
+
+    def test_retry_rejects_changed_source_fields_or_hashes(self):
+        original = json.dumps({"application": "timesaver", **valid_values()})
+        changed = valid_values()
+        changed["expected_zip_sha256"] = "0" * 64
+        with self.assertRaises(RequestError):
+            request_from_push(
+                "release-requests/timesaver/retries/1.1.6-1.json",
+                json.dumps({"application": "timesaver", **changed}),
+                original_request_json=original,
+                prior_retry_paths=[],
+            )
+
+    def test_retry_rejects_other_version_and_unapproved_fields(self):
+        raw = json.dumps({"application": "timesaver", **valid_values()})
+        with self.assertRaises(RequestError):
+            request_from_push(
+                "release-requests/timesaver/retries/1.1.7-1.json",
+                raw,
+                original_request_json=raw,
+                prior_retry_paths=[],
+            )
+        with self.assertRaises(RequestError):
+            request_from_push(
+                "release-requests/timesaver/retries/1.1.6-1.json",
+                json.dumps({"application": "timesaver", **valid_values(), "token": "blocked"}),
+                original_request_json=raw,
+                prior_retry_paths=[],
+            )
+
+    def test_retry_numbers_must_be_unique_and_sequential(self):
+        first = "release-requests/timesaver/retries/1.1.6-1.json"
+        second = "release-requests/timesaver/retries/1.1.6-2.json"
+        with self.assertRaises(RequestError):
+            validate_retry_sequence(first, [first])
+        with self.assertRaises(RequestError):
+            validate_retry_sequence("release-requests/timesaver/retries/1.1.6-3.json", [])
+        validate_retry_sequence(second, [first])
+
+    @patch("scripts.resolve_timesaver_release_request.subprocess.run")
+    def test_retry_baseline_is_read_from_original_request_parent(self, run):
+        run.side_effect = [
+            CompletedProcess([], 0, stdout="a" * 40 + "\n", stderr=""),
+            CompletedProcess([], 0, stdout="b" * 40 + "\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps({"app_id": "timesaver", "version": "1.1.5"}),
+                stderr="",
+            ),
+        ]
+        self.assertEqual(_original_public_version_for_request("1.1.6"), "1.1.5")
+        self.assertEqual(run.call_count, 3)
+
+    def test_retry_requires_the_public_version_recorded_before_original_request(self):
+        request = request_from_dispatch(valid_values())
+        prior = {**request, "version": "1.1.5"}
+        self.assertEqual(
+            ensure_version_allowed(
+                public_json(prior), request, run_attempt="1", retry_baseline_version="1.1.5"
+            ),
+            "new-version",
+        )
+        with self.assertRaises(RequestError):
+            ensure_version_allowed(
+                public_json({**request, "version": "1.1.4"}),
+                request,
+                run_attempt="1",
+                retry_baseline_version="1.1.5",
+            )
+        with self.assertRaises(RequestError):
+            ensure_version_allowed(
+                public_json(request),
+                request,
+                run_attempt="1",
+                retry_baseline_version="1.1.5",
+            )
 
     def test_invalid_or_mismatched_version_is_rejected(self):
         values = valid_values()
@@ -96,6 +189,11 @@ class ReleaseRequestTests(unittest.TestCase):
         with self.assertRaises(RequestError):
             parse_push_changes(
                 f"A{tab}release-requests/timesaver/1.1.6.json{newline}A{tab}README.md{newline}"
+            )
+        with self.assertRaises(RequestError):
+            parse_push_changes(
+                f"A{tab}release-requests/timesaver/retries/1.1.6-1.json{newline}"
+                f"A{tab}release-requests/timesaver/retries/1.1.6-2.json{newline}"
             )
 
     def test_only_deployment_repository_main_push_is_accepted(self):
