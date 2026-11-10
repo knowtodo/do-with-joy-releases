@@ -24,6 +24,14 @@ from scripts.timesaver_release_assets import (
     release_asset_upload_plan,
     validate_candidate_file_set,
     verify_file,
+    release_asset_upload_plan,
+)
+from scripts.timesaver_release_draft import (
+    GitHubAPIError,
+    ReleaseResolutionError,
+    find_release_by_tag,
+    resolve_release,
+    validate_git_tag_ref,
 )
 
 ZIP_SHA = "C78E1A8FC2546A40327C701E8E6DDB461DC679A322AD900EAA741405B1808B2D"
@@ -417,6 +425,314 @@ class ReleaseAssetValidationTests(unittest.TestCase):
             parse_optional_repair_expectations(REPAIR_SHA, "")
         with self.assertRaises(AssetValidationError):
             parse_optional_repair_expectations("", REPAIR_BYTES)
+
+
+class DraftReleaseResolutionTests(unittest.TestCase):
+    repository = "knowtodo/do-with-joy-releases"
+    tag = "timesaver-v1.1.8"
+    title = "TIMESAVER 1.1.8"
+    notes = "Approved release notes"
+
+    def release(self, **overrides):
+        data = {
+            "url": "https://api.github.com/repos/knowtodo/do-with-joy-releases/releases/440303231",
+            "html_url": "https://github.com/knowtodo/do-with-joy-releases/releases/tag/untagged-abc123",
+            "id": 440303231,
+            "tag_name": self.tag,
+            "target_commitish": "main",
+            "name": self.title,
+            "draft": True,
+            "assets": [],
+            "body": self.notes,
+        }
+        data.update(overrides)
+        return data
+
+    def resolve(self, api_call, **kwargs):
+        return resolve_release(
+            api_call,
+            repository=self.repository,
+            tag=self.tag,
+            title=self.title,
+            notes=self.notes,
+            sleep=kwargs.get("sleep", lambda _seconds: None),
+        )
+
+    def test_existing_draft_is_resolved_from_release_list_and_verified_by_id(self):
+        existing = self.release()
+        calls = []
+
+        def api(method, endpoint, payload):
+            calls.append((method, endpoint, payload))
+            if method == "LIST":
+                return [[existing]]
+            if method == "GET":
+                self.assertEqual(endpoint, f"repos/{self.repository}/releases/440303231")
+                return existing
+            self.fail(f"Unexpected API call: {method} {endpoint}")
+
+        resolved = self.resolve(api)
+        self.assertEqual(resolved["id"], 440303231)
+        self.assertTrue(resolved["draft"])
+        self.assertIn("untagged-", resolved["html_url"])
+        self.assertEqual([call[0] for call in calls], ["LIST", "GET"])
+
+    def test_tag_ref_absence_does_not_hide_existing_draft_or_trigger_creation(self):
+        existing = self.release()
+        calls = []
+
+        def api(method, endpoint, payload):
+            calls.append((method, endpoint))
+            if method == "LIST":
+                return [[existing]]
+            if method == "GET":
+                return existing
+            if "git/ref/tags/" in endpoint:
+                raise GitHubAPIError("HTTP 404: Not Found", 404)
+            self.fail(f"Unexpected API call: {method} {endpoint}")
+
+        resolved = self.resolve(api)
+        self.assertEqual(resolved["id"], 440303231)
+        self.assertNotIn("POST", [method for method, _ in calls])
+        self.assertFalse(any("git/ref/tags/" in endpoint for _, endpoint in calls))
+
+    def test_existing_draft_with_each_partial_asset_state_is_resolved(self):
+        expected = {
+            "TIMESAVER-1.1.8.zip": 124510111,
+            "TIMESAVER_Update_Repair.exe": 12032757,
+        }
+        states = (
+            ([], sorted(expected)),
+            ([{"name": "TIMESAVER-1.1.8.zip", "size": 124510111}], ["TIMESAVER_Update_Repair.exe"]),
+            ([{"name": "TIMESAVER_Update_Repair.exe", "size": 12032757}], ["TIMESAVER-1.1.8.zip"]),
+            (
+                [
+                    {"name": "TIMESAVER-1.1.8.zip", "size": 124510111},
+                    {"name": "TIMESAVER_Update_Repair.exe", "size": 12032757},
+                ],
+                [],
+            ),
+        )
+        for assets, missing in states:
+            with self.subTest(assets=assets):
+                selected = find_release_by_tag(
+                    [[self.release(assets=assets)]],
+                    repository=self.repository,
+                    tag=self.tag,
+                    title=self.title,
+                    notes=self.notes,
+                )
+                self.assertIsNotNone(selected)
+                self.assertEqual(
+                    release_asset_upload_plan(
+                        selected["assets"], expected, reject_unexpected=True
+                    ),
+                    missing,
+                )
+
+    def test_duplicate_matching_release_tags_are_rejected(self):
+        with self.assertRaisesRegex(ReleaseResolutionError, "Multiple Releases"):
+            find_release_by_tag(
+                [[self.release(), self.release(id=440303232,
+                    url="https://api.github.com/repos/knowtodo/do-with-joy-releases/releases/440303232")]],
+                repository=self.repository,
+                tag=self.tag,
+                title=self.title,
+                notes=self.notes,
+            )
+
+    def test_wrong_release_metadata_is_rejected(self):
+        for changed in (
+            {"name": "TIMESAVER 1.1.9"},
+            {"body": "Different release notes"},
+            {"tag_name": "timesaver-v1.1.9"},
+            {"target_commitish": "another-branch"},
+            {"url": "https://api.github.com/repos/other/releases/440303231"},
+            {"draft": "true"},
+        ):
+            with self.subTest(changed=changed):
+                with self.assertRaises(ReleaseResolutionError):
+                    find_release_by_tag(
+                        [[self.release(**changed)]],
+                        repository=self.repository,
+                        tag=self.tag,
+                        title=self.title,
+                        notes=self.notes,
+                    )
+
+    def test_failed_or_malformed_release_list_never_means_no_release(self):
+        calls = []
+
+        def api(method, endpoint, payload):
+            calls.append(method)
+            raise GitHubAPIError("HTTP 403: Resource not accessible", 403)
+
+        with self.assertRaises(GitHubAPIError):
+            self.resolve(api)
+        self.assertEqual(calls, ["LIST"])
+
+        calls.clear()
+
+        def malformed(method, endpoint, payload):
+            calls.append(method)
+            return {"message": "Not Found"}
+
+        with self.assertRaises(ReleaseResolutionError):
+            self.resolve(malformed)
+        self.assertEqual(calls, ["LIST"])
+
+    def test_empty_successful_list_creates_once_then_uses_returned_id(self):
+        created = self.release(
+            id=440303999,
+            url="https://api.github.com/repos/knowtodo/do-with-joy-releases/releases/440303999",
+            assets=[],
+        )
+        calls = []
+        delays = []
+
+        def api(method, endpoint, payload):
+            calls.append((method, endpoint, payload))
+            if method == "LIST":
+                return [[]]
+            if method == "POST":
+                self.assertEqual(endpoint, f"repos/{self.repository}/releases")
+                self.assertEqual(payload["tag_name"], self.tag)
+                self.assertEqual(payload["target_commitish"], "main")
+                self.assertIs(payload["draft"], True)
+                return created
+            if method == "GET":
+                self.assertEqual(endpoint, f"repos/{self.repository}/releases/440303999")
+                return created
+            self.fail(f"Unexpected API call: {method} {endpoint}")
+
+        resolved = self.resolve(api, sleep=delays.append)
+        self.assertEqual(resolved["id"], 440303999)
+        self.assertEqual([method for method, _, _ in calls].count("POST"), 1)
+        self.assertEqual(delays, [])
+
+    def test_create_response_without_release_id_fails_without_second_creation(self):
+        created = self.release()
+        created.pop("id")
+        created.pop("url")
+        calls = []
+
+        def api(method, endpoint, payload):
+            calls.append(method)
+            if method == "LIST":
+                return []
+            if method == "POST":
+                return created
+            self.fail(f"Unexpected API call: {method} {endpoint}")
+
+        with self.assertRaisesRegex(ReleaseResolutionError, "numeric ID"):
+            self.resolve(api)
+        self.assertEqual(calls, ["LIST", "POST"])
+
+    def test_create_response_metadata_mismatch_fails_closed(self):
+        created = self.release(id=440303999,
+            url="https://api.github.com/repos/knowtodo/do-with-joy-releases/releases/440303999",
+            name="Unexpected title")
+        calls = []
+
+        def api(method, endpoint, payload):
+            calls.append(method)
+            if method == "LIST":
+                return []
+            if method == "POST":
+                return created
+            self.fail(f"Unexpected API call: {method} {endpoint}")
+
+        with self.assertRaisesRegex(ReleaseResolutionError, "title"):
+            self.resolve(api)
+        self.assertEqual(calls, ["LIST", "POST"])
+
+    def test_release_id_lookup_retries_transient_404_but_never_recreates(self):
+        existing = self.release()
+        calls = []
+        delays = []
+
+        def api(method, endpoint, payload):
+            calls.append(method)
+            if method == "LIST":
+                return [[existing]]
+            if method == "GET" and calls.count("GET") < 3:
+                raise GitHubAPIError("HTTP 404: Not Found", 404)
+            if method == "GET":
+                return existing
+            self.fail("An existing Release must not be recreated.")
+
+        resolved = self.resolve(api, sleep=delays.append)
+        self.assertEqual(resolved["id"], 440303231)
+        self.assertEqual(calls.count("GET"), 3)
+        self.assertEqual(calls.count("POST"), 0)
+        self.assertEqual(delays, [1.0, 2.0])
+
+    def test_release_id_lookup_does_not_retry_authentication_failure(self):
+        existing = self.release()
+        calls = []
+
+        def api(method, endpoint, payload):
+            calls.append(method)
+            if method == "LIST":
+                return [[existing]]
+            if method == "GET":
+                raise GitHubAPIError("HTTP 403: Forbidden", 403)
+            self.fail("An existing Release must not be recreated.")
+
+        with self.assertRaises(GitHubAPIError):
+            self.resolve(api)
+        self.assertEqual(calls, ["LIST", "GET"])
+
+    def test_release_id_lookup_rejects_a_different_release(self):
+        existing = self.release()
+        wrong = self.release(
+            id=440303232,
+            url="https://api.github.com/repos/knowtodo/do-with-joy-releases/releases/440303232",
+        )
+
+        def api(method, endpoint, payload):
+            if method == "LIST":
+                return [[existing]]
+            if method == "GET":
+                return wrong
+            self.fail(f"Unexpected API call: {method} {endpoint}")
+
+        with self.assertRaisesRegex(ReleaseResolutionError, "different Release"):
+            self.resolve(api)
+
+    def test_matching_draft_with_wrong_tag_blocks_duplicate_creation(self):
+        wrong_tag = self.release(tag_name="untagged-0ead94fd45de03c5ee60")
+        with self.assertRaisesRegex(ReleaseResolutionError, "unexpected tag"):
+            find_release_by_tag(
+                [[wrong_tag]],
+                repository=self.repository,
+                tag=self.tag,
+                title=self.title,
+                notes=self.notes,
+            )
+
+    def test_published_tag_ref_is_verified_separately_from_release(self):
+        valid = {
+            "ref": f"refs/tags/{self.tag}",
+            "object": {"sha": "a" * 40, "type": "commit", "url": "https://api.github.com/"},
+        }
+        self.assertEqual(validate_git_tag_ref(valid, self.tag), valid)
+        with self.assertRaises(ReleaseResolutionError):
+            validate_git_tag_ref({"ref": valid["ref"], "object": {"sha": "bad", "type": "commit"}}, self.tag)
+        with self.assertRaises(ReleaseResolutionError):
+            validate_git_tag_ref({"ref": "refs/tags/other", "object": valid["object"]}, self.tag)
+
+    def test_unexpected_release_assets_are_rejected_by_existing_asset_planner(self):
+        with self.assertRaises(AssetValidationError):
+            release_asset_upload_plan(
+                [{"name": "TIMESAVER-1.1.8.zip", "size": 124510111},
+                 {"name": "unexpected.exe", "size": 7}],
+                {
+                    "TIMESAVER-1.1.8.zip": 124510111,
+                    "TIMESAVER_Update_Repair.exe": 12032757,
+                },
+                reject_unexpected=True,
+            )
 
 
 if __name__ == "__main__":
