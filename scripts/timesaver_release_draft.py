@@ -108,17 +108,14 @@ def find_release_by_tag(
     if len(matches) > 1:
         raise ReleaseResolutionError("Multiple Releases have the requested tag; refusing modification.")
     if not matches:
-        same_draft_identity = [
+        same_draft_title = [
             release
             for release in releases
-            if release.get("draft") is True
-            and release.get("name") == title
-            and isinstance(release.get("body"), str)
-            and normalize_notes(release["body"]) == normalize_notes(notes)
+            if release.get("draft") is True and release.get("name") == title
         ]
-        if same_draft_identity:
+        if same_draft_title:
             raise ReleaseResolutionError(
-                "A matching Draft exists with an unexpected tag; refusing to create a duplicate."
+                "A Draft with the requested title exists but its tag or notes differ; refusing to create a duplicate."
             )
         return None
     return validate_release(
