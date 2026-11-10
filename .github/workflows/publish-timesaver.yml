@@ -145,6 +145,7 @@ jobs:
           assert source.index('verify_public_asset "$REPAIR_ASSET_NAME"') < json_start
           release_logic = source[release_start:json_start]
           assert "timesaver_release_draft.py resolve" in release_logic
+          assert 'URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$TAG/$ASSET"' in release_logic
           assert "releases/$RELEASE_ID" in release_logic
           assert "gh release create" not in release_logic
           assert "git/ref/tags/$TAG" in release_logic and "validate-tag-ref" in release_logic
@@ -456,6 +457,7 @@ jobs:
           set -euo pipefail
           TAG="timesaver-v$VERSION"
           ASSET="TIMESAVER-$VERSION.zip"
+          URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$TAG/$ASSET"
           TITLE="TIMESAVER $VERSION"
 
           python scripts/timesaver_release_draft.py resolve \
