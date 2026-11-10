@@ -701,7 +701,7 @@ class DraftReleaseResolutionTests(unittest.TestCase):
 
     def test_draft_with_wrong_tag_or_notes_blocks_duplicate_creation(self):
         wrong_tag = self.release(tag_name="untagged-0ead94fd45de03c5ee60")
-        wrong_notes = self.release(body="Different release notes")
+        wrong_notes = self.release(tag_name="untagged-0ead94fd45de03c5ee60", body="Different release notes")
         for ambiguous in (wrong_tag, wrong_notes):
             with self.subTest(release=ambiguous):
                 with self.assertRaisesRegex(ReleaseResolutionError, "tag or notes differ"):
