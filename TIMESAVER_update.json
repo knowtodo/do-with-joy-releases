@@ -1,7 +1,7 @@
 {
   "app_id": "timesaver",
-  "version": "1.1.7",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.7/TIMESAVER-1.1.7.zip",
-  "sha256": "cd441b59a44ceeeabc4f63dcbbcfd2adfcedbda02e71c5399f98f5a925f58f8b",
-  "release_notes": "업데이트 확인창의 버튼 표시 오류를 수정했습니다."
+  "version": "1.1.8",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.8/TIMESAVER-1.1.8.zip",
+  "sha256": "89ad86c7c294b05dd7701303f22c0a204ad1bd2c00980b8109960d5bb5aba7b3",
+  "release_notes": "[변경사항]\n- Updater.exe 누락으로 자동 업데이트가 중단되는 문제 개선\n- 검증된 업데이트 패키지를 이용한 Updater.exe 복구 기능 추가\n- 왼쪽 설정 버튼 아래 '업데이트 복구' 기능 추가\n- 기존 사용자용 별도 업데이트 복구 도구 제공\n- 업데이트 오류 안내 및 진단 로그 개선"
 }
