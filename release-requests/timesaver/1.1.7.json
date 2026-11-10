@@ -1,0 +1,12 @@
+{
+  "application": "timesaver",
+  "version": "1.1.7",
+  "source_repository": "knowtodo/timesaver",
+  "source_run_id": "42746272741",
+  "artifact_name": "TIMESAVER-1.1.7-RELEASE-CANDIDATE",
+  "expected_source_commit": "00fec4121725a7ef848a139e6e74cd8dd6d6693c",
+  "expected_zip_sha256": "CD441B59A44CEEEABC4F63DCBBCFD2ADFCEDBDA02E71C5399F98F5A925F58F8B",
+  "expected_exe_sha256": "B6E95577C4842D1CBF5872779F753B971421B2D1C672773785032959700F0B56",
+  "expected_updater_sha256": "CEB28ED1E8DFDE50FD1BD8511DE9D05900D4F3C98339AA2D55CEFBC6F49CD498",
+  "release_notes": "업데이트 확인창의 버튼 표시 오류를 수정했습니다."
+}
