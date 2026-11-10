@@ -24,7 +24,6 @@ from scripts.timesaver_release_assets import (
     release_asset_upload_plan,
     validate_candidate_file_set,
     verify_file,
-    release_asset_upload_plan,
 )
 from scripts.timesaver_release_draft import (
     GitHubAPIError,
