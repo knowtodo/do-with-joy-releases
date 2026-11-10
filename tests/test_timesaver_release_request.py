@@ -2,6 +2,7 @@ import json
 import unittest
 from subprocess import CompletedProcess
 from unittest.mock import patch
+from pathlib import Path
 
 from scripts.resolve_timesaver_release_request import (
     RequestError,
@@ -67,6 +68,16 @@ class ReleaseRequestTests(unittest.TestCase):
             ),
             {"application": "timesaver", **valid_values()},
         )
+
+    def test_retry_requires_the_original_request_file(self):
+        raw = json.dumps({"application": "timesaver", **valid_values()})
+        with patch.object(Path, "read_text", side_effect=FileNotFoundError):
+            with self.assertRaises(RequestError):
+                request_from_push(
+                    "release-requests/timesaver/retries/1.1.6-1.json",
+                    raw,
+                    prior_retry_paths=[],
+                )
 
     def test_retry_rejects_changed_source_fields_or_hashes(self):
         original = json.dumps({"application": "timesaver", **valid_values()})
