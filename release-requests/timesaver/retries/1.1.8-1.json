@@ -1,0 +1,14 @@
+{
+  "application": "timesaver",
+  "version": "1.1.8",
+  "source_repository": "knowtodo/timesaver",
+  "source_run_id": "42809684843",
+  "artifact_name": "TIMESAVER-1.1.8-RELEASE-CANDIDATE",
+  "expected_source_commit": "f82dd1c317335db8861077b182a89a5ff7b1a53c",
+  "expected_zip_sha256": "89AD86C7C294B05DD7701303F22C0A204AD1BD2C00980B8109960D5BB5ABA7B3",
+  "expected_exe_sha256": "B8E26CB25CB0A57757DBBDF8304D3B7BA7D46798E5162EBAFC65561C9BB468A9",
+  "expected_updater_sha256": "CEB28ED1E8DFDE50FD1BD8511DE9D05900D4F3C98339AA2D55CEFBC6F49CD498",
+  "expected_repair_sha256": "C592BA1DB49205F53EF81060DF14F249089DC33365D35EAC9E7A5BB73527B1FD",
+  "expected_repair_bytes": "12032757",
+  "release_notes": "[변경사항]\n- Updater.exe 누락으로 자동 업데이트가 중단되는 문제 개선\n- 검증된 업데이트 패키지를 이용한 Updater.exe 복구 기능 추가\n- 왼쪽 설정 버튼 아래 '업데이트 복구' 기능 추가\n- 기존 사용자용 별도 업데이트 복구 도구 제공\n- 업데이트 오류 안내 및 진단 로그 개선"
+}
