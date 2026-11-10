@@ -9,7 +9,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from scripts.timesaver_release_assets import AssetValidationError, parse_optional_repair_expectations
+if __package__:
+    from .timesaver_release_assets import AssetValidationError, parse_optional_repair_expectations
+else:
+    from timesaver_release_assets import AssetValidationError, parse_optional_repair_expectations
 
 REQUIRED_REQUEST_KEYS = {
     "application",
