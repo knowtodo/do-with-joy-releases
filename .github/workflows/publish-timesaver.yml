@@ -116,8 +116,8 @@ jobs:
           assert "asset_count" in source and "refusing modification" in source
           assert "RESOLVED_RETRY_REQUEST" in source and "RESOLVED_RETRY_BASELINE_VERSION" in source
           assert "release-requests/timesaver/retries" in source
-          release_start = source.index("Create or safely reuse draft Release and asset")
-          json_start = source.index("Update or verify update JSON after public ZIP validation")
+          release_start = source.index("      - name: Create or safely reuse draft Release and asset\\n")
+          json_start = source.index("      - name: Update or verify update JSON after public ZIP validation\\n")
           release_logic = source[release_start:json_start]
           assert "find_release_by_tag()" in release_logic and "releases/$RELEASE_ID" in release_logic
           assert 'elif [[ "$asset_count" -eq 0 ]]' in release_logic
