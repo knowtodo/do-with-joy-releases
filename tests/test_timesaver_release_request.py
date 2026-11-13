@@ -21,9 +21,11 @@ from scripts.timesaver_release_assets import (
     REPAIR_ASSET_NAME,
     expected_candidate_file_names,
     parse_optional_repair_expectations,
+    parse_sha256_manifest,
     release_asset_upload_plan,
     validate_candidate_file_set,
     verify_file,
+    verify_version_notes,
 )
 from scripts.timesaver_release_draft import (
     GitHubAPIError,
@@ -321,22 +323,55 @@ class ReleaseAssetValidationTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_legacy_and_repair_candidate_file_sets_are_versioned_exactly(self):
-        legacy_root = self.root / "legacy"
-        legacy_root.mkdir()
-        legacy_names = expected_candidate_file_names("1.1.7", include_repair=False)
-        for name in legacy_names:
-            (legacy_root / name).write_bytes(b"candidate")
-        self.assertNotIn(REPAIR_ASSET_NAME, legacy_names)
-        self.assertEqual(set(validate_candidate_file_set(legacy_root, legacy_names)), legacy_names)
+    def test_candidate_file_sets_match_the_windows_artifact_contract(self):
+        base_names = {
+            "SHA256SUMS.txt",
+            "VERSION_AND_PATCH_NOTES.txt",
+            "TIMESAVER-1.1.9.zip",
+        }
+        without_repair = expected_candidate_file_names("1.1.9", include_repair=False)
+        self.assertEqual(without_repair, base_names)
 
-        repair_root = self.root / "repair"
-        repair_root.mkdir()
-        repair_names = expected_candidate_file_names("1.1.8", include_repair=True)
-        for name in repair_names:
-            (repair_root / name).write_bytes(b"candidate")
-        self.assertIn(REPAIR_ASSET_NAME, repair_names)
-        self.assertEqual(set(validate_candidate_file_set(repair_root, repair_names)), repair_names)
+        with_repair = expected_candidate_file_names("1.1.9", include_repair=True)
+        self.assertEqual(with_repair, base_names | {REPAIR_ASSET_NAME})
+
+        for label, names in (("without-repair", without_repair), ("with-repair", with_repair)):
+            root = self.root / label
+            root.mkdir()
+            for name in names:
+                (root / name).write_bytes(b"candidate")
+            self.assertEqual(set(validate_candidate_file_set(root, names)), names)
+
+    def test_version_notes_are_bound_to_the_requested_candidate(self):
+        path = self.root / "VERSION_AND_PATCH_NOTES.txt"
+        text = (
+            "TIMESAVER v1.1.9 — Release Candidate\n"
+            "APP_VERSION: 1.1.9\n\n"
+            "Patch notes\n"
+        )
+        path.write_text(text, encoding="utf-8", newline="\n")
+        self.assertEqual(
+            verify_version_notes(path, "1.1.9"),
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        with self.assertRaises(AssetValidationError):
+            verify_version_notes(path, "1.1.8")
+
+    def test_sha256_manifest_rejects_malformed_duplicates_and_paths(self):
+        path = self.root / "SHA256SUMS.txt"
+        digest = hashlib.sha256(b"fixture").hexdigest()
+        path.write_text(f"{digest}  file.zip\n", encoding="ascii")
+        self.assertEqual(parse_sha256_manifest(path), {"file.zip": digest})
+
+        for contents in (
+            f"{digest} file.zip\n{digest} file.zip\n",
+            f"{digest} ../file.zip\n",
+            "not-a-hash file.zip\n",
+            f"{digest} file.zip extra\n",
+        ):
+            path.write_text(contents, encoding="ascii")
+            with self.assertRaises(AssetValidationError):
+                parse_sha256_manifest(path)
 
     def test_missing_or_unapproved_candidate_files_are_rejected(self):
         expected = expected_candidate_file_names("1.1.8", include_repair=True)

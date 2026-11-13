@@ -137,7 +137,9 @@ jobs:
           assert "release_asset_upload_plan" in helper and "reject_unexpected" in helper
           assert "--require-all" in source and "plan_args+=(--repair-name" in source
           assert 'verify_public_asset "$REPAIR_ASSET_NAME"' in source
-          assert "repair tool hash mismatch" in source
+          assert 'run.get("path") != ".github/workflows/test-windows-isolated.yml"' in source
+          assert "VERSION_AND_PATCH_NOTES.txt" in source
+          assert "verify_version_notes" in source and "parse_sha256_manifest" in source
           assert "ZIP_MEMBERS=TIMESAVER.exe,Updater.exe" in source
           assert "release-requests/timesaver/retries" in source
           release_start = source.index("      - name: Create or safely reuse draft Release and assets\n")
@@ -287,8 +289,10 @@ jobs:
               REPAIR_ASSET_NAME,
               expected_candidate_file_names,
               parse_optional_repair_expectations,
+              parse_sha256_manifest,
               validate_candidate_file_set,
               verify_file,
+              verify_version_notes,
           )
 
           def stop(message):
@@ -324,6 +328,10 @@ jobs:
               stop("The source run ID returned by GitHub does not match the requested run.")
           if run.get("status") != "completed" or run.get("conclusion") != "success":
               stop("The selected source run is not completed successfully.")
+          if run.get("path") != ".github/workflows/test-windows-isolated.yml":
+              stop("The source run did not use the approved Windows candidate-validation workflow.")
+          if run.get("event") not in {"push", "pull_request"}:
+              stop("The source run event is not an approved candidate-validation event.")
           head_repo = (run.get("head_repository") or {}).get("full_name")
           if head_repo != source_repo:
               stop("The source run belongs to a different repository.")
@@ -341,33 +349,18 @@ jobs:
           except AssetValidationError as exc:
               stop(str(exc))
 
-          manifest = {}
-          for line in (root / "BUILD_VERIFICATION.txt").read_text(encoding="utf-8").splitlines():
-              if "=" in line:
-                  key, value = line.split("=", 1)
-                  manifest[key] = value
-          if manifest.get("VERSION") != version:
-              stop("Candidate manifest version mismatch.")
-          if manifest.get("SOURCE_COMMIT", "").lower() != expected_source:
-              stop("Candidate manifest source commit mismatch.")
-          if manifest.get("EXE_SHA256", "").lower() != expected_exe:
-              stop("Candidate manifest EXE hash mismatch.")
-          if manifest.get("UPDATER_SHA256", "").lower() != expected_updater:
-              stop("Candidate manifest Updater hash mismatch.")
-          if manifest.get("ZIP_SHA256", "").lower() != expected_zip:
-              stop("Candidate manifest ZIP hash mismatch.")
-          if manifest.get("ZIP_MEMBERS") != "TIMESAVER.exe,Updater.exe":
-              stop("Candidate manifest ZIP member list is not the approved two-file layout.")
-          for prior in ("1.1.2", "1.1.3", "1.1.4", "1.1.5"):
-              if manifest.get(f"LEGACY_{prior}") != "PASS":
-                  stop(f"Candidate manifest is missing successful legacy update validation for {prior}.")
+          try:
+              notes_sha256 = verify_version_notes(
+                  candidate_files["VERSION_AND_PATCH_NOTES.txt"],
+                  version,
+              )
+          except AssetValidationError as exc:
+              stop(str(exc))
 
           zip_path = root / f"TIMESAVER-{version}.zip"
           zip_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
           if zip_hash != expected_zip:
               stop(f"ZIP SHA-256 mismatch: got {zip_hash}.")
-          if manifest.get("ZIP_BYTES") != str(zip_path.stat().st_size):
-              stop("Candidate manifest ZIP size mismatch.")
 
           with zipfile.ZipFile(zip_path) as archive:
               names = [info.filename for info in archive.infolist() if not info.is_dir()]
@@ -382,9 +375,6 @@ jobs:
               updater_hash = hashlib.sha256(archive.read("Updater.exe")).hexdigest()
               if exe_hash != expected_exe or updater_hash != expected_updater:
                   stop("An executable hash inside the ZIP does not match the approved value.")
-              if manifest.get("EXE_BYTES") != str(len(archive.read("TIMESAVER.exe"))):
-                  stop("Candidate manifest EXE size mismatch.")
-
           repair_path = ""
           repair_hash = ""
           repair_bytes = ""
@@ -400,25 +390,23 @@ jobs:
                   )
               except AssetValidationError as exc:
                   stop(str(exc))
-              if manifest.get("REPAIR_EXE_SHA256", "").lower() != expected_repair_hash:
-                  stop("Candidate manifest repair tool hash mismatch.")
-              if manifest.get("REPAIR_EXE_BYTES") != str(expected_repair_bytes):
-                  stop("Candidate manifest repair tool byte size mismatch.")
               repair_hash = actual_repair_hash
               repair_bytes = str(expected_repair_bytes)
 
-          sums = {}
-          for line in (root / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
-              parts = line.split()
-              if len(parts) == 2:
-                  sums[parts[1].lstrip("*")] = parts[0].lower()
           expected_sums = {
               f"TIMESAVER-{version}.zip": expected_zip,
               "TIMESAVER.exe": expected_exe,
               "Updater.exe": expected_updater,
+              "VERSION_AND_PATCH_NOTES.txt": notes_sha256,
           }
+          if repair_hash:
+              expected_sums[REPAIR_ASSET_NAME] = repair_hash
+          try:
+              sums = parse_sha256_manifest(root / "SHA256SUMS.txt")
+          except AssetValidationError as exc:
+              stop(str(exc))
           if sums != expected_sums:
-              stop("SHA256SUMS.txt does not match the verified candidate files.")
+              stop("SHA256SUMS.txt does not exactly match every verified candidate file.")
 
           out_path = zip_path.resolve()
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
