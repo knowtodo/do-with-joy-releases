@@ -1,7 +1,7 @@
 {
   "app_id": "timesaver",
-  "version": "1.1.8",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.8/TIMESAVER-1.1.8.zip",
-  "sha256": "89ad86c7c294b05dd7701303f22c0a204ad1bd2c00980b8109960d5bb5aba7b3",
-  "release_notes": "[변경사항]\n- Updater.exe 누락으로 자동 업데이트가 중단되는 문제 개선\n- 검증된 업데이트 패키지를 이용한 Updater.exe 복구 기능 추가\n- 왼쪽 설정 버튼 아래 '업데이트 복구' 기능 추가\n- 기존 사용자용 별도 업데이트 복구 도구 제공\n- 업데이트 오류 안내 및 진단 로그 개선"
+  "version": "1.1.9",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.9/TIMESAVER-1.1.9.zip",
+  "sha256": "86dc8fbcd9650c3286c820268255b30b1241aad2408dba96c5192ad6702200ae",
+  "release_notes": "[변경사항]\n- 구직촉진수당 상담일지 생성 시 발생하던 소득 변수 참조 오류 수정\n- 프로그램 종료 시 one-file 임시 폴더 진단 및 안전 정리 개선\n- 설정·업데이트 복구 메뉴 UI 개선\n- 검증된 공용 Updater 적용 및 구버전 복구 호환성 보완"
 }
