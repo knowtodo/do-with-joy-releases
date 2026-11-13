@@ -1,0 +1,14 @@
+{
+  "application": "timesaver",
+  "version": "1.1.9",
+  "source_repository": "knowtodo/timesaver",
+  "source_run_id": "43355570483",
+  "artifact_name": "TIMESAVER-1.1.9-RELEASE-CANDIDATE",
+  "expected_source_commit": "98a77df796fe2026186caa9fa3d570576280bf2c",
+  "expected_zip_sha256": "86dc8fbcd9650c3286c820268255b30b1241aad2408dba96c5192ad6702200ae",
+  "expected_exe_sha256": "03c0ca66dd9fb0979a15b467bd0229d63dd7dbb1ffcbe003d8dcb00b64e3c47b",
+  "expected_updater_sha256": "141f78ad89c63654479fd9b990fe423f1902eff904947b4ef5583bb1030ceaac",
+  "expected_repair_sha256": "019b0345855be61d73aa8cb5d27a9d8f72af4e1542e69076f0e9b4a605f931b0",
+  "expected_repair_bytes": "12587133",
+  "release_notes": "[변경사항]\n- 구직촉진수당 상담일지 생성 시 발생하던 소득 변수 참조 오류 수정\n- 프로그램 종료 시 one-file 임시 폴더 진단 및 안전 정리 개선\n- 설정·업데이트 복구 메뉴 UI 개선\n- 검증된 공용 Updater 적용 및 구버전 복구 호환성 보완"
+}
