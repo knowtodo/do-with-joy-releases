@@ -33,14 +33,63 @@ def expected_candidate_file_names(version: str, include_repair: bool) -> set[str
     if not VERSION_RE.fullmatch(version):
         raise AssetValidationError("Candidate version must be X.Y.Z.")
     names = {
-        "BUILD_VERIFICATION.txt",
-        "RELEASE_NOTES.txt",
         "SHA256SUMS.txt",
         f"TIMESAVER-{version}.zip",
+        "VERSION_AND_PATCH_NOTES.txt",
     }
     if include_repair:
         names.add(REPAIR_ASSET_NAME)
     return names
+
+
+def verify_version_notes(path: Path, version: str) -> str:
+    if not VERSION_RE.fullmatch(version):
+        raise AssetValidationError("Candidate version must be X.Y.Z.")
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise AssetValidationError("Version notes are missing or unreadable.") from exc
+    try:
+        lines = data.decode("utf-8").splitlines()
+    except UnicodeError as exc:
+        raise AssetValidationError("Version notes must be UTF-8 text.") from exc
+    if (
+        not lines
+        or lines[0] != f"TIMESAVER v{version} — Release Candidate"
+        or f"APP_VERSION: {version}" not in lines
+    ):
+        raise AssetValidationError("Version notes do not identify the requested candidate version.")
+    return hashlib.sha256(data).hexdigest()
+
+
+def parse_sha256_manifest(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise AssetValidationError("SHA256SUMS.txt is missing or invalid ASCII.") from exc
+
+    checksums: dict[str, str] = {}
+    for line in lines:
+        parts = line.split()
+        if len(parts) != 2:
+            raise AssetValidationError("SHA256SUMS.txt contains a malformed entry.")
+        digest, name = parts
+        if name.startswith("*"):
+            name = name[1:]
+        if (
+            not SHA256_RE.fullmatch(digest)
+            or not name
+            or name in {".", ".."}
+            or "/" in name
+            or "\\" in name
+        ):
+            raise AssetValidationError("SHA256SUMS.txt contains an invalid hash or filename.")
+        if name in checksums:
+            raise AssetValidationError("SHA256SUMS.txt contains a duplicate filename.")
+        checksums[name] = digest.lower()
+    if not checksums:
+        raise AssetValidationError("SHA256SUMS.txt is empty.")
+    return checksums
 
 
 def validate_candidate_file_set(root: Path, expected_names: set[str]) -> dict[str, Path]:
