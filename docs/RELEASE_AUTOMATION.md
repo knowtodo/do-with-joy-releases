@@ -75,9 +75,16 @@
 
 ## 향후 패치
 
-1. Codex가 소스 수정·테스트·후보 빌드를 완료하고 해당 버전의 검증된 run ID, artifact, commit, ZIP/EXE/Updater 해시와 notes를 확보합니다.
-2. 사용자가 정식 배포를 승인한 뒤, Codex가 새 버전 파일 `release-requests/timesaver/X.Y.Z.json` 하나만 main에 추가합니다.
-3. GitHub Actions가 Artifact를 다시 검증하고 Release, ZIP 공개 검증, update JSON 갱신을 자동 수행합니다.
-4. Codex는 Actions 결과, 공개 Release, raw JSON과 공개 ZIP 해시를 확인하고 최종 상태를 보고합니다.
+### 후보 빌드 자동 연결
 
-새 배포 시스템이나 매 패치마다 별도의 workflow를 추가하지 않습니다. 자동 실행 여부는 GitHub push event의 실제 Actions run으로 확인하며, GitHub가 해당 인증 주체의 push 이벤트를 전달하지 않으면 배포 완료로 간주하지 않습니다.
+소스 저장소 `knowtodo/timesaver`의 PR이 검증·승인되어 main에 병합되면, main push가 기존 `TIMESAVER isolated Windows tests` workflow를 자동 실행합니다. 이 workflow는 전체 테스트·패키징·업데이트 통합 검증 후 `TIMESAVER-X.Y.Z-RELEASE-CANDIDATE`를 생성합니다. 개발 브랜치 push와 PR 검증은 `TEST-CANDIDATE`를 생성하며 정식 publisher가 받을 후보가 아닙니다. 이 source Actions 실행은 후보를 만들 뿐 Release를 게시하지 않습니다.
+
+### 정식 배포 흐름
+
+1. Codex가 소스 수정과 테스트를 진행하고, 사용자가 확인할 필요가 있으면 TEST-CANDIDATE를 제공합니다.
+2. 소스 PR이 승인되어 main에 반영되면 main push 후보 workflow가 자동 실행됩니다. Codex는 실행 이벤트가 `push`, 브랜치가 `main`, 소스 SHA가 실제 main HEAD인지 확인하고 `RELEASE-CANDIDATE` run ID, artifact, commit, ZIP/EXE/Updater/복구 도구 해시와 필요한 바이트 크기를 기록합니다.
+3. 사용자가 정식 배포를 승인하면 Codex가 검증된 값으로 새 요청 파일 `release-requests/timesaver/X.Y.Z.json` 하나만 배포 저장소 main에 추가합니다. 이 단일 파일 push가 기존 publisher를 자동 실행합니다. 정상 경로에서는 Actions 화면에서 수동 Run workflow를 누를 필요가 없습니다.
+4. 기존 publisher가 source artifact를 재검증하고 Release 및 자산을 게시한 뒤 공개 ZIP의 다운로드와 SHA-256을 확인합니다. 이 검증을 통과한 뒤에만 `TIMESAVER_update.json`을 갱신합니다.
+5. Codex는 publisher Actions, 공개 Release/자산, raw JSON 및 공개 ZIP SHA-256을 확인하고 최종 상태를 보고합니다.
+
+비상 복구에는 위의 기존 `workflow_dispatch` 수동 실행을 유지합니다. 새 배포 시스템이나 매 패치마다 별도 workflow를 추가하지 않습니다. 자동 실행은 source main push run과 배포 요청 push run 각각의 실제 GitHub Actions 결과로 확인하며, 어느 한쪽이라도 생성·검증되지 않으면 완료로 간주하지 않습니다.
