@@ -1,7 +1,7 @@
 {
   "app_id": "timesaver",
-  "version": "1.1.9",
-  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.9/TIMESAVER-1.1.9.zip",
-  "sha256": "86dc8fbcd9650c3286c820268255b30b1241aad2408dba96c5192ad6702200ae",
-  "release_notes": "[변경사항]\n- 구직촉진수당 상담일지 생성 시 발생하던 소득 변수 참조 오류 수정\n- 프로그램 종료 시 one-file 임시 폴더 진단 및 안전 정리 개선\n- 설정·업데이트 복구 메뉴 UI 개선\n- 검증된 공용 Updater 적용 및 구버전 복구 호환성 보완"
+  "version": "1.1.10",
+  "download_url": "https://github.com/knowtodo/do-with-joy-releases/releases/download/timesaver-v1.1.10/TIMESAVER-1.1.10.zip",
+  "sha256": "2e3b854d55dc42e7777e3c9589bbb8732616969da63b2ae7c171339c3fd221fa",
+  "release_notes": "[변경사항]\n- 설정 화면을 상담일지, 안내 메시지, 프리셋으로 구분\n- 상담일지 기본 안내 문구 수정 및 저장 기능 개선\n- 안내 메시지 상시 출력 문구 사용자 편집 기능 추가\n- 상담사 정보 외 센터주소 및 네이버지도 링크 설정 지원\n- 초기상담 준비사항과 마무리 인사 통합 편집\n- 사용자 지정 안내 메시지 프리셋 5개 추가\n- 구직촉진수당 신청 및 증빙자료 안내 기본 문구 개편\n- 날짜 입력 형식 확대 (YY.MM.DD / YYMMDD / YYYY-MM-DD)\n- 기존 출력 형식과 사용자 설정 호환성 유지\n- 테스트 환경 및 업데이트 관련 안정성 검증 보완"
 }
