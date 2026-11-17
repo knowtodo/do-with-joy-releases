@@ -1,0 +1,14 @@
+{
+  "application": "timesaver",
+  "version": "1.1.10",
+  "source_repository": "knowtodo/timesaver",
+  "source_run_id": "44113422273",
+  "artifact_name": "TIMESAVER-1.1.10-RELEASE-CANDIDATE",
+  "expected_source_commit": "e339598a37346bd796dbf7d6e4b3f0d8e7d7b9de",
+  "expected_zip_sha256": "2e3b854d55dc42e7777e3c9589bbb8732616969da63b2ae7c171339c3fd221fa",
+  "expected_exe_sha256": "e8ad694605a2bb1fe292fd55ade74f56116d9c5e493cfabd192b2e9c921e2abf",
+  "expected_updater_sha256": "141f78ad89c63654479fd9b990fe423f1902eff904947b4ef5583bb1030ceaac",
+  "release_notes": "[변경사항]\n- 설정 화면을 상담일지, 안내 메시지, 프리셋으로 구분\n- 상담일지 기본 안내 문구 수정 및 저장 기능 개선\n- 안내 메시지 상시 출력 문구 사용자 편집 기능 추가\n- 상담사 정보 외 센터주소 및 네이버지도 링크 설정 지원\n- 초기상담 준비사항과 마무리 인사 통합 편집\n- 사용자 지정 안내 메시지 프리셋 5개 추가\n- 구직촉진수당 신청 및 증빙자료 안내 기본 문구 개편\n- 날짜 입력 형식 확대 (YY.MM.DD / YYMMDD / YYYY-MM-DD)\n- 기존 출력 형식과 사용자 설정 호환성 유지\n- 테스트 환경 및 업데이트 관련 안정성 검증 보완",
+  "expected_repair_sha256": "ddd19a6814b0775e713d27cf02f0ebcf952fefb03bd334b790ec71f8dbc4f52b",
+  "expected_repair_bytes": "12585410"
+}
