@@ -1,0 +1,14 @@
+{
+  "application": "timesaver",
+  "version": "1.1.11",
+  "source_repository": "knowtodo/timesaver",
+  "source_run_id": "44288531303",
+  "artifact_name": "TIMESAVER-1.1.11-RELEASE-CANDIDATE",
+  "expected_source_commit": "d4886af630a7e55643fa1989bec4416e6265095f",
+  "expected_zip_sha256": "e7ce4c86ac4e3b176ba982f3b82f07954192596a320bcd916377f21f25613dd7",
+  "expected_exe_sha256": "97bf4d2cc18f63f2e8ef8d15bd1f6bd59e1d43e4cd33ac19bcf921eb7a1e7656",
+  "expected_updater_sha256": "141f78ad89c63654479fd9b990fe423f1902eff904947b4ef5583bb1030ceaac",
+  "release_notes": "[변경사항]\n- 구직촉진수당 활동번호에 11번 취업을 추가하고 기타 활동을 12번으로 변경 (IAP 활동번호는 유지)\n- 취업사실 확인, 기업명·취업일 필수 입력 검증 및 전용 상담일지 생성 개선\n- 입사지원 기업명·지원일자를 기업별로 개별 출력하고 일부이행 시 실제 수행한 활동만 표시\n- 날짜 입력 형식 안내를 상담일지 제목 옆으로 통합하고 개별 입력 예시를 제거\n- YY.MM.DD / YYMMDD / YYYY-MM-DD 입력 형식과 기존 날짜 파싱·계산 유지",
+  "expected_repair_sha256": "542ef3b2d401a33922649b9a0ac8c691e99b1f2f3922eab6b8f8ad70d901bf44",
+  "expected_repair_bytes": "12586326"
+}
